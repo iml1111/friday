@@ -1,0 +1,292 @@
+# friday-agent-loop-poc
+
+Friday CLI의 **에이전트 루프(agentic loop)** 를 역분석해 Python으로 재구현한 POC입니다.
+단순 복제가 아니라, 루프를 **도메인 무관 + LLM 무관(LLM-agnostic)** 프레임워크로 만들어
+프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표입니다.
+
+핵심은 호출자가 `QueryEngine.step()`을 반복해 구동하는 턴 루프입니다:
+
+```
+사용자 메시지 → LLM 호출 → stop_reason 분기
+                              ├─ end_turn  → 종료(Terminal)
+                              └─ tool_use  → 도구 실행 → tool_result를 대화에 추가 → 다시 루프
+                                            (ContextOverflowError → 호출자가 engine.compact(state) → 재시도)
+```
+
+> `docs/architecture/`가 구현체 중심 진실 공급원입니다. 아키텍처 큰 그림은
+> `CLAUDE.md`와 [docs/architecture/00-overview.md](docs/architecture/00-overview.md)를 참고하세요.
+
+---
+
+## 🧭 구현 가이드 — 코드 리뷰용
+
+핵심 구현은 전부 `friday_agent/` 안에 있습니다. 진입점은 `friday_agent/core/engine.py` › `QueryEngine.step(state)` / `QueryEngine.compact(state)`이고, 루프 심장은 `friday_agent/core/loop.py` › `run_one_turn()`입니다.
+
+턴 루프 한 바퀴:
+
+```
+run_one_turn() 한 번
+ 1. normalize_for_api() → provider.complete() 호출
+ 2. stop_reason 분기:
+      end_turn  → Terminal(completed)
+      tool_use  → run_tools() → tool_result 추가 → 다음 턴(Checkpoint)
+ ContextOverflowError → 호출자가 engine.compact(state) → 재시도
+ LLMError → Terminal(model_error) + tool_result 백필
+```
+
+구조 상세(읽는 순서·핵심 데이터 구조·불변식·모듈 지도)는 [docs/architecture/](docs/architecture/00-overview.md) 참조.
+
+상세 함정 목록은 `CLAUDE.md`(구현 시 핵심 함정)와 [docs/architecture/06-invariants.md](docs/architecture/06-invariants.md)를 참고하세요.
+LLM 백엔드 교체는 아래 [다른 LLM 백엔드로 교체하기](#다른-llm-백엔드로-교체하기),
+도구 추가는 [직접 도구 만들기 (BYO Tool)](#직접-도구-만들기-byo-tool)를 보세요.
+
+---
+
+## 요구 사항
+
+- **Python 3.11+**
+- **Anthropic 또는 OpenAI API 키** (실제 LLM 호출을 해보려는 경우. 단위 테스트는 키 없이 동작)
+
+## 설치
+
+```bash
+# 1. 가상환경 (권장)
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# 2. 패키지 + 개발 의존성 설치 (editable)
+pip install -e ".[dev]"
+```
+
+설치되는 의존성: `anthropic`, `openai`, `pydantic`, `anyio`, `python-dotenv` (+ dev: `pytest`, `pytest-asyncio`).
+
+## API 키 주입
+
+API 키는 **라이브러리(`friday_agent`) 내부에서 환경변수를 읽지 않습니다** — 항상
+provider 생성자(어댑터)에 `api_key=`로 **외부에서 주입**합니다(필수). 키를 어디서
+가져올지(환경변수·시크릿 매니저 등)는 호출하는 애플리케이션의 책임입니다. `QueryEngine`은
+이렇게 만든 provider를 직접 받습니다(model/api_key 인자 없음).
+
+```python
+import os
+from friday_agent.api.anthropic_provider import AnthropicProvider
+from friday_agent.core.engine import QueryEngine
+
+provider = AnthropicProvider(model="claude-sonnet-4-6", api_key=os.environ["ANTHROPIC_API_KEY"])
+engine = QueryEngine(provider=provider, ...)
+```
+
+검증 스크립트(`scripts/verify_*.py`, `run_agent.py`)는 이 "경계 계층" 역할을 하며,
+`scripts/_env.py`가 `resolve_api_key(model)`(prefix에 맞는 키를 `.env`/환경변수에서 읽음)와
+`create_provider(model, api_key=...)`(prefix로 어댑터 라우팅)를 제공합니다. prefix 자동
+라우팅은 라이브러리가 아니라 이 경계 계층의 책임입니다.
+
+```bash
+# .env (스크립트 실행용 — 라이브러리가 아니라 _env.py가 읽음)
+ANTHROPIC_API_KEY=sk-ant-...     # claude-* 모델 사용 시
+OPENAI_API_KEY=sk-...            # gpt-* 모델 사용 시
+```
+
+| 변수 | 설명 |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic(claude-*) 호출용 — 스크립트의 `_env.resolve_api_key`가 읽음 |
+| `OPENAI_API_KEY` | OpenAI(gpt-*) 호출용 — 동일 |
+
+> 검증 스크립트와 `run_agent.py`는 모델 ID를 `LLM_MODEL` 환경변수로 받습니다.
+
+키 외 설정값도 **환경 변수가 아니라 생성자 인자**로 지정합니다(기본값을 쓰면 생략 가능):
+
+| 설정 | 위치 | 기본값 | 설명 |
+|---|---|---|---|
+| `api_key` | 어댑터(`AnthropicProvider(api_key=...)` / `OpenAIProvider(api_key=...)`) | (없음, 필수) | 벤더 API 키. 외부 주입 전용(환경변수 폴백 없음). provider 생성 시점에 주입 |
+| `model` | 어댑터(`AnthropicProvider(model=...)`) | (없음) | 모델 ID. prefix 자동 라우팅이 필요하면 caller가 처리(예: `scripts/_env.py`의 `create_provider`) |
+| `config` | `QueryEngine(config=...)` (예: `AnthropicConfig(max_tokens=...)` / `provider.config_type(max_tokens=...)`) | `provider.config_type()` | 벤더 호출 config를 직접 주입 |
+| `max_tokens` | 벤더 config 필드 (예: `provider.config_type(max_tokens=...)`) | `16384` | 응답당 최대 출력 토큰 |
+| `max_concurrency` | `QueryEngine(max_concurrency=...)` | `10` | 도구 병렬 실행 최대 동시성 |
+
+---
+
+## 빠른 시작 (Quick Start)
+
+가장 작은 에이전트 루프 — 사용자 메시지 하나를 넣고, 모델이 도구를 호출했다가
+최종 답변으로 종료하기까지 호출자가 `step()`을 반복해 구동합니다.
+
+```python
+from friday_agent.core.engine import QueryEngine
+from friday_agent.core.state import LoopState, Checkpoint, Terminal
+from friday_agent.messages.types import create_user_message
+from friday_agent.api.provider import ContextOverflowError
+
+engine = QueryEngine(provider=provider, tools=[...])
+state = LoopState(messages=[create_user_message("질문")])
+while True:
+    try:
+        outcome = None
+        async for item in engine.step(state):   # 한 턴 실행 — 각 Message 도착 즉시 yield
+            if isinstance(item, (Checkpoint, Terminal)):
+                outcome = item
+            else:
+                print(item)                     # 어시스턴트 응답 / tool_result 실시간 처리
+    except ContextOverflowError:
+        state = await engine.compact(state)     # 대화 요약 후 재시도
+        continue
+    if isinstance(outcome, Terminal):
+        break                                   # 종료
+    state = outcome.state                       # 다음 턴
+```
+
+마지막으로 받은 item이 `Terminal`이면 루프를 종료합니다. `terminal.reason`은 `completed` / `model_error` 중 하나입니다.
+
+---
+
+## 검증 스크립트 실행 (실 API)
+
+`scripts/`에는 각 Phase의 검증 시나리오를 실제 Anthropic API로 실행하는 스크립트가 있습니다.
+**실 API를 호출하므로 토큰 비용이 발생합니다** (각 스크립트는 `max_tokens`로 가드레일이 걸려 있습니다).
+
+```bash
+# 모델 ID는 LLM_MODEL 환경변수로 주입 (prefix로 provider 자동 라우팅)
+# P2 — 단일 도구 사이클: tool_use → tool_result → 최종 응답
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p2.py
+
+# P3 — 호출자 주도 compact 복구 검증 (engine.compact()를 명시 호출해 실백엔드 요약+연속성 확인)
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p3.py
+
+# P4 — 실 백엔드 엔드투엔드 + 어댑터 교체 구조 실증
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p4.py
+```
+
+각 스크립트는 체크리스트를 출력하고 PASS/FAIL과 함께 종료 코드(0/1)를 반환합니다.
+
+## 테스트 실행
+
+단위/결정적 테스트는 **API 키 없이** 동작합니다(가짜 provider 사용).
+
+```bash
+pytest
+# 또는 자세히
+pytest -v
+```
+
+---
+
+## 직접 도구 만들기 (BYO Tool)
+
+`ExampleTool`(`friday_agent/tools/builtin/example_tool.py`)이 도구 작성 패턴의 예시입니다.
+`Tool`을 상속하고 입력 스키마와 `call()`만 구현하면 됩니다.
+
+```python
+from pydantic import BaseModel, Field
+from friday_agent.tools.base import Tool, ToolResult
+
+
+class WeatherInput(BaseModel):
+    city: str = Field(description="날씨를 조회할 도시 이름")   # ← 필드 설명도 모델에 전달됨
+
+
+class WeatherTool(Tool):
+    """주어진 도시의 현재 날씨를 조회한다. 사용자가 특정 지역의 날씨/기온을 물을 때 사용."""
+    # ↑ 이 docstring이 그대로 LLM에 전달되는 도구 설명(description)이 된다 — 비우지 말 것
+
+    name = "WeatherTool"
+
+    def input_schema(self) -> type[BaseModel]:
+        return WeatherInput
+
+    def is_concurrency_safe(self, input_data: dict) -> bool:
+        return True   # 읽기 전용이라 병렬 안전
+
+    async def call(self, args: dict) -> ToolResult:
+        parsed = WeatherInput(**args)
+        # 여기에 실제 API/DB 호출을 구현
+        return ToolResult(data=f"{parsed.city}는 맑음")
+```
+
+만든 도구를 `QueryEngine(tools=[WeatherTool()])`에 넘기면 모델이 호출할 수 있습니다.
+
+### LLM은 도구를 어떻게 인지하는가
+
+모델이 "이 도구가 무엇이고 어떻게 호출하는지" 판단하는 근거는 전부 `Tool.get_tool_schema()`
+(`friday_agent/tools/base.py`)가 만드는 **3개 키**로 환원됩니다. 위 `WeatherTool`이 실제로
+전송하는 스키마는 다음과 같습니다(API로 그대로 전달):
+
+```jsonc
+{
+  "name": "WeatherTool",                       // ① 호출 식별자 — 클래스의 name 속성
+  "description": "주어진 도시의 현재 날씨를 ...",  // ② 무엇을 하는 도구인가 — 클래스 docstring
+  "input_schema": {                            // ③ 어떤 인자가 필요한가 — input_schema()의 Pydantic 모델
+    "properties": {
+      "city": { "description": "날씨를 조회할 도시 이름", "title": "City", "type": "string" }
+    },
+    "required": ["city"],
+    "type": "object"
+  }
+}
+```
+
+따라서 도구를 LLM에 "잘" 인지시키는 일은 곧 **이 세 가지를 충실히 쓰는 것**입니다:
+
+| 무엇이 | 어디서 오는가 | 개발자 가이드 |
+|---|---|---|
+| `name` | 클래스 `name` 속성 | 동사+명사로 의도가 드러나게 (`SearchOrders` > `Tool1`) |
+| `description` | **클래스 docstring** | **반드시 채울 것.** "무엇을 하는가 + 언제 호출하는가"를 한두 문장으로. 비면 빈 문자열이 전송돼 모델이 이름만으로 추론해야 함 |
+| `input_schema` | `input_schema()`가 반환하는 Pydantic 모델 | 모든 필드에 `Field(description=...)`를 달 것. 타입·required·기본값은 Pydantic이 자동 직렬화 |
+
+> 정적 docstring 대신 입력에 따라 설명을 동적으로 바꾸려면 `description()` 메서드를 오버라이드합니다(기본값이 docstring).
+> Pydantic v2 메타키 중 최상위 `title`/`$defs`만 제거되고, 위처럼 **필드별 `title`은 남습니다** — 정상입니다.
+
+### 실행 정책 메서드는 LLM에 전달되지 않는다
+
+`is_concurrency_safe`는 스키마에
+**포함되지 않습니다.** 모델 인지용이 아니라 **오케스트레이터가 실행을 제어**하는 런타임 신호입니다:
+
+> `is_concurrency_safe()`가 `True`인 도구만 병렬 배치로 실행됩니다 (읽기 전용 도구가 대표적인 예).
+> 외부 상태를 바꾸는(mutating) 도구는 `is_concurrency_safe()`를 `False`로 반환해 순차 실행됩니다.
+> 도구 파티셔닝 상세는 [02-tool-orchestration](docs/architecture/02-tool-orchestration.md) 참조.
+
+---
+
+## 패키지 구조 (모듈 지도)
+
+핵심 코드는 전부 `friday_agent/` 아래에 있습니다. 각 파일의 책임과 진입 심볼은 [00-overview의 모듈 지도](docs/architecture/00-overview.md#모듈-지도)를 참조하세요.
+
+## 분산 재개 (stateless)
+
+멀티턴을 **턴 단위로 끊어 여러 컨테이너에 분산**하려면 `step()`과 직렬화 API를 씁니다 — 한 턴 = 한 단위, `Checkpoint` = 컨테이너 경계를 넘는 유일한 상태입니다.
+
+```python
+import json
+from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.messages.types import create_user_message
+
+# 컨테이너 A — 첫 턴
+state = LoopState(messages=[create_user_message("질문")])
+outcome = None
+async for item in engine.step(state):           # 한 턴 실행
+    if isinstance(item, (Checkpoint, Terminal)):
+        outcome = item
+    else:
+        persist(item)                           # Message 실시간 처리
+if isinstance(outcome, Checkpoint):
+    blob = json.dumps(outcome.to_dict())        # 최종 Checkpoint sentinel 직렬화해 저장/이송
+
+# 컨테이너 B (다른 시스템) — blob을 로드해 이어서
+state = Checkpoint.from_dict(json.loads(blob)).state
+async for item in engine.step(state):           # 다음 턴 … Terminal까지 반복
+    ...
+```
+
+체크포인트는 항상 깨끗한 턴 경계에서만 나오므로(`tool_use`↔`tool_result` 정합 보존) `Checkpoint.state`를 그대로 직렬화·재개할 수 있습니다. 설계 상세는 [01-core-loop](docs/architecture/01-core-loop.md) 참조.
+
+## 다른 LLM 백엔드로 교체하기
+
+LLM 교체는 **`LLMProvider`** 한 인터페이스만 구현하면 됩니다(`friday_agent/api/provider.py`).
+`complete()`가 LLM 응답을 `AssistantResponse`로 정규화하면 코어 루프 코드를 바꾸지 않고 다른 백엔드로 동작합니다.
+추상화 경계 상세는 [03-llm-providers](docs/architecture/03-llm-providers.md) 참조.
+
+---
+
+## 더 읽을거리
+
+- `CLAUDE.md` — 아키텍처 큰 그림, 구현 스코프 헌장, 핵심 함정
+- `docs/architecture/` — 구현체 중심 아키텍처 문서 (진실 공급원)
