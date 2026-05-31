@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "friday-agent-loop-poc"
+version = "0.1.0"
+description = "docs-only reimplementation of the Friday Agent Loop (fairness experiment)"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.43.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "anyio>=4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["friday_agent*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

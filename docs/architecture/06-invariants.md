@@ -1,0 +1,31 @@
+# 06 — Par-Critical Invariants
+
+## What the Invariant Is
+
+"Par-critical integrity" refers to the rule that **`tool_use` blocks and `tool_result` blocks must correspond 1:1**. The LLM API rejects the request outright unless every `tool_use` block that appeared in the previous assistant message has a matching `tool_result` in the next user message. This constraint must not break on any execution path, including error recovery and parallel execution. The table below lists the core invariants that guarantee loop integrity across the system; each entry links to the concrete guarantee point in the source code.
+
+---
+
+## Invariant List
+
+| Invariant | Why (if broken) | Guaranteed at |
+|---|---|---|
+| Every `tool_use` has a matching `tool_result` | LLM API rejects the request | `core/loop.py:75` `yield_missing_tool_result_blocks()` — on `LLMError`, backfills synthetic error `tool_result`s for incomplete blocks → [01-core-loop](01-core-loop.md) |
+| Results keep the original `tool_use` block order even under parallel execution | Breaks pair matching and reproducibility | `tools/orchestrator.py:145` `run_tools()` — `asyncio.gather` returns results in argument order, so block order is preserved regardless of completion order → [02-tool-orchestration](02-tool-orchestration.md) |
+| `tool_result` message `role="user"`, first message `user`, user/assistant alternation | API rejects on role-rule violation | `messages/types.py:40·54` — `create_tool_result_message()`·`create_user_message()` create with `role="user"`; `messages/normalize.py` — passes the role tag through as-is during API serialization → [05-messages](05-messages.md) |
+| `step()` sends the entire `state.messages` to the API (window management = caller) | Arbitrary truncation loses context | `core/loop.py:163-165` — passes the whole `messages_for_query = list(state_messages)`; overflow propagates to the caller as `ContextOverflowError` → `engine.compact()` retry → [01-core-loop](01-core-loop.md)·[04-context-compaction](04-context-compaction.md) |
+| `temperature` not sent when thinking is enabled | Anthropic API rejects the two parameters together | `api/anthropic_provider.py:175-181` `_build_params()` — if `cfg.thinking_enabled`, sets only the `thinking` parameter; `temperature` is an `elif` branch (mutually exclusive) → [03-llm-providers](03-llm-providers.md) |
+| Empty `tools=[]` omits the `tools` field entirely | Some models treat an empty array as an error | `api/anthropic_provider.py:171-172` `if tools: params["tools"] = tools`; `api/openai_provider.py:172-173` `if oa_tools: params["tools"] = oa_tools` — both adapters apply the same guard in `_build_params()` → [03-llm-providers](03-llm-providers.md) |
+| thinking blocks are echoed verbatim | Omitting one breaks the API turn sequence (Anthropic requirement) | `messages/normalize.py:57-60` — the `block.type == "thinking"` branch inserts `{"type": "thinking", "thinking": block.text}` as-is; the comment states "omitting one breaks the API turn" → [05-messages](05-messages.md) |
+
+---
+
+## Cross-References
+
+For the detailed implementation of each invariant, see the owning subsystem doc:
+
+- **[01-core-loop](01-core-loop.md)** — `run_one_turn()`, `yield_missing_tool_result_blocks()`, caller-driven compaction flow
+- **[02-tool-orchestration](02-tool-orchestration.md)** — `run_tools()` parallel execution · order preservation
+- **[03-llm-providers](03-llm-providers.md)** — `_build_params()` thinking/temperature mutual exclusion, empty tools handling
+- **[04-context-compaction](04-context-compaction.md)** — `ContextOverflowError` propagation, `engine.compact()` retry contract
+- **[05-messages](05-messages.md)** — role rules, thinking echo, `normalize_for_api()` serialization

@@ -1,0 +1,114 @@
+# 00. Overview
+
+Entry-point document for grasping the whole architecture of the `friday_agent/` package at a glance.  
+Detailed implementation is covered in the numbered sub-documents (01–06).
+
+---
+
+## Project Purpose
+
+A POC that reimplements Friday CLI's **agent loop (agentic loop)** in Python.  
+Rather than a mere clone, it turns the loop into a **domain-agnostic + LLM-agnostic** framework.  
+The goal is to serve as a foundation for building AI agents for a wide range of purposes beyond programming.
+
+Implementation: `friday_agent/` package (Python 3.11+, `anthropic` + `openai` SDK + `pydantic` + `anyio`).
+
+---
+
+## Big Picture: Caller-Driven Turn Loop
+
+The core design principle is that **the library exposes only single-turn execution (`QueryEngine.step()`) and externalizes the while-true driver to the caller**. This lets the same engine be reused across diverse execution contexts such as a REPL and distributed orchestrators.
+
+```
+Caller (REPL / distributed orchestrator)
+   │  LoopState(messages=[...])
+   ▼
+async for item in engine.step(state):   ← AsyncGenerator
+   │   run_one_turn(state) drives it internally
+   │     1. normalize → provider.complete()
+   │     2. stop_reason branch
+   │          end_turn → Terminal(completed)
+   │          tool_use → run_tools → tool_result
+   │
+   ├─ yield: AssistantMessage          ← immediately on response arrival
+   ├─ yield: tool_result Message…      ← each tool result
+   └─ yield: Checkpoint | Terminal     ← exactly 1 final sentinel
+        On ContextOverflowError → caller runs engine.compact(state), then retries
+
+If item is Checkpoint, update state = item.state and call step() again; if Terminal, stop.
+```
+
+Emitting a serializable `Checkpoint(LoopState)` at each turn boundary supports **stateless distributed resume**.
+
+---
+
+## Module Map
+
+| Subsystem | Files | Doc |
+|---|---|---|
+| `core/` | `loop.py`·`engine.py`·`state.py` | [01-core-loop](01-core-loop.md) |
+| `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py` | [02-tool-orchestration](02-tool-orchestration.md) |
+| `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) |
+| `context/` | `compact.py` | [04-context-compaction](04-context-compaction.md) |
+| `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
+| (cross-cutting) | par-critical invariants | [06-invariants](06-invariants.md) |
+| (cross-cutting) | catalog of all data models | [07-data-models](07-data-models.md) |
+
+---
+
+## Reading Order
+
+00 → 01 → 02 → 03 → 04 → 05 → 06 (→ 07 for reference)
+
+| Order | Doc | Key Content |
+|---|---|---|
+| 00 | This doc | Purpose · big picture · module map · scope |
+| 01 | [01-core-loop](01-core-loop.md) | `run_one_turn()`, `QueryEngine.step()`, state flow |
+| 02 | [02-tool-orchestration](02-tool-orchestration.md) | Tool partitioning · parallel/sequential execution · order preservation |
+| 03 | [03-llm-providers](03-llm-providers.md) | `LLMProvider` abstraction · Anthropic · OpenAI adapters |
+| 04 | [04-context-compaction](04-context-compaction.md) | `ContextOverflowError` · `engine.compact()` · summarization strategy |
+| 05 | [05-messages](05-messages.md) | Message union type · `normalize_for_api()` |
+| 06 | [06-invariants](06-invariants.md) | par-critical invariants · `tool_use`↔`tool_result` integrity |
+| 07 | [07-data-models](07-data-models.md) | Catalog of all data model fields · serialization boundaries (reference) |
+
+---
+
+## Implementation Scope Charter
+
+The spec intentionally describes only **"the essence of the agent loop algorithm"**. The excluded items below exist in the original Friday source but are outside this POC's scope. **Do not re-add them arbitrarily**.
+
+| Included (implemented at par level) | Excluded (intentional) |
+|---|---|
+| while-true loop + stop_reason branching, all termination/recovery paths | Subagent delegation |
+| Tool partitioning + concurrency (parallel/sequential batches) | Streaming / incremental display UX |
+| External compact + overflow propagation (caller-driven compact) | Context optimizations such as Snip·Micro·Collapse |
+| System prompt assembly machinery | Model fallback · Beta headers · prompt caching specifics |
+| LLM-agnostic provider boundary | Vendor build modes (ant/REPL/SIMPLE) |
+
+**Par-critical integrity**: if a `tool_use`↔`tool_result` pair is broken, the LLM API rejects the request. This integrity must be preserved on every path, including recovery and parallel execution. See [06-invariants](06-invariants.md) for details.
+
+---
+
+## Verification · Test Entry Points
+
+```bash
+# No API key required — full test suite with fake provider
+python -m pytest
+
+# Real API verification (calls real backends — incurs token cost)
+LLM_MODEL=<model-id> python scripts/verify_p2.py   # tool orchestration
+LLM_MODEL=<model-id> python scripts/verify_p3.py   # context overflow · compact recovery
+LLM_MODEL=<model-id> python scripts/verify_p4.py   # real backend end-to-end · adapter swap demonstration
+
+# Run the interactive agent
+python scripts/run_agent.py
+```
+
+---
+
+## Design Rationale (Why) Summary
+
+The library exposes only the single-turn `QueryEngine.step()` and externalizes the while-true driver to the caller. This decision has two key benefits.
+
+1. **Stateless distributed resume** — since a serializable `Checkpoint(LoopState)` is emitted at every turn boundary, state can be restored even across process restarts or in distributed-queue environments. JSON serde is handled by the types' (`Checkpoint`/`LoopState`/`Message`) `to_dict()`/`from_dict()` methods.
+2. **Separation of context-management responsibility** — propagating `ContextOverflowError` to the caller keeps the library internals simple and lets the caller directly control the compact strategy (timing · summarization method) (`engine.compact(state)`).
