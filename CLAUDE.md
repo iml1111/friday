@@ -2,11 +2,11 @@
 
 ## 프로젝트 목적
 
-Friday CLI의 **에이전트 루프(agentic loop)** 를 역분석한 명세를 따라 Python으로 재구현하는 POC다. 단순 복제가 아니라, 루프를 **도메인 무관 + LLM 무관(LLM-agnostic)** 프레임워크로 만들어 프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표다.
+여러 에이전트 루프(agentic loop) 동작 구조를 분석해, **클라우드/서버 사이드에서 에이전트 루프를 구동**하기 위한 **도메인 무관 + LLM 무관(LLM-agnostic)** SDK다. 프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표다.
 
 ## 현재 상태
 
-**POC 구현 완료** — `friday_agent/` 패키지에 Phase 1~3(최소 루프 · 도구 오케스트레이션 · 컨텍스트 관리)이 모두 구현돼 있다. 실 백엔드 어댑터(Anthropic · OpenAI) + 모델 prefix 라우팅, stateless 분산 재개(LoopState/Checkpoint)까지 포함한다. 아키텍처 문서(`docs/architecture/`)가 권위 기준이다.
+**구현 완료** — `friday_agent/` 패키지에 Phase 1~3(최소 루프 · 도구 오케스트레이션 · 컨텍스트 관리)이 모두 구현돼 있다. 실 백엔드 어댑터(Anthropic · OpenAI) + 모델 prefix 라우팅, stateless 분산 재개(LoopState/Checkpoint)까지 포함한다. 아키텍처 문서(`docs/architecture/`)가 권위 기준이다.
 
 - 설치: `pip install -e ".[dev]"`  ·  테스트(키 불필요, fake provider): `python -m pytest`
 - 실 API 검증(토큰 비용 발생): `LLM_MODEL=<모델ID> python scripts/verify_p2.py` (P2~P4)
@@ -30,7 +30,7 @@ Friday CLI의 **에이전트 루프(agentic loop)** 를 역분석한 명세를 �
 핵심은 `run_one_turn()`(단일 턴) 위에서 **호출자가 도는** 턴 루프다 (`docs/architecture/01-core-loop.md`, `02-tool-orchestration.md` 참조):
 
 ```
-호출자 (REPL / 분산 오케스트레이터)
+호출자 (분산 오케스트레이터 / 서버 사이드)
         │  LoopState(messages=[...])  ← 첫 턴은 호출자가 구성
         ▼
 engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) ───────┐
@@ -47,7 +47,7 @@ engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) �
 호출자가 `async for`로 소비: 마지막 sentinel이 Checkpoint면 state를 넘겨 step()을 다시 호출, Terminal이면 종료.
 ```
 
-> 구현 메모: 라이브러리는 단일 턴 실행 `QueryEngine.step()`만 노출한다 — batch 드라이버(`query()`)·완주 진입점(`submit_message`)·`max_turns`는 제거됐다(역분석 명세 `02`의 while-true 드라이버를 호출자에게 외부화). 턴 경계에서 직렬화 가능한 `Checkpoint(LoopState)`를 방출해 **stateless 분산 재개**(`QueryEngine.step()` + 타입의 `to_dict()`/`from_dict()`)를 지원한다.
+> 구현 메모: 라이브러리는 단일 턴 실행 `QueryEngine.step()`만 노출한다 — batch 드라이버(`query()`)·완주 진입점(`submit_message`)·`max_turns`는 제거됐다(에이전트 루프 명세 `02`의 while-true 드라이버를 호출자에게 외부화). 턴 경계에서 직렬화 가능한 `Checkpoint(LoopState)`를 방출해 **stateless 분산 재개**(`QueryEngine.step()` + 타입의 `to_dict()`/`from_dict()`)를 지원한다.
 
 핵심 데이터 구조 (`docs/architecture/01-core-loop.md`·`05-messages.md`):
 - **`Message` + `ContentBlock`** — 별도 *Message 클래스 유니온은 없다. 단일 `Message` dataclass(`type` 태그: `user`/`assistant`/`system`)에 flag 필드(`is_compact_summary`/`is_meta`/`is_api_error_message`)뿐이다. 블록도 단일 flat `ContentBlock` dataclass(`type`: `text`/`tool_use`/`tool_result`/`thinking`)로 표현한다.
@@ -56,7 +56,7 @@ engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) �
 
 ## 구현 스코프 헌장 (반드시 준수)
 
-아키텍처 문서는 의도적으로 **"에이전트 루프 알고리즘의 본질"** 만 기술한다 — 실제 Friday 소스보다 추상 수준이 높다. 아래 제외 항목은 원본 소스에 존재하지만 본 POC 범위가 아니다. **임의로 다시 추가하지 말 것** (상세: `docs/architecture/00-overview.md`):
+아키텍처 문서는 의도적으로 **"에이전트 루프 알고리즘의 본질"** 만 기술한다 — 분석한 실제 에이전트 루프 구현들보다 추상 수준이 높다. 아래 제외 항목은 그런 구현들에 존재하지만 본 SDK 범위가 아니다. **임의로 다시 추가하지 말 것** (상세: `docs/architecture/00-overview.md`):
 
 | 포함 (par 수준으로 구현) | 제외 (의도적) |
 |---|---|

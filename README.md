@@ -1,7 +1,7 @@
-# friday-agent-loop-poc
+# friday-agent-loop
 
-Friday CLI의 **에이전트 루프(agentic loop)** 를 역분석해 Python으로 재구현한 POC입니다.
-단순 복제가 아니라, 루프를 **도메인 무관 + LLM 무관(LLM-agnostic)** 프레임워크로 만들어
+여러 에이전트 루프(agentic loop) 동작 구조를 분석해, **클라우드/서버 사이드에서 에이전트 루프를 구동**하기 위한
+**도메인 무관 + LLM 무관(LLM-agnostic)** SDK입니다.
 프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표입니다.
 
 핵심은 호출자가 `QueryEngine.step()`을 반복해 구동하는 턴 루프입니다:

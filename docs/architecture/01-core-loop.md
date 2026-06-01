@@ -143,7 +143,7 @@ step(state) → ContextOverflowError 발생
 ## ⑦ 설계 근거(Why)
 
 **왜 단일 턴 step-only인가?**  
-라이브러리 내부에 while-true 드라이버를 두지 않음으로써 REPL·분산 큐·서버리스 등 다양한 실행 컨텍스트에서 동일한 `QueryEngine.step()`을 재사용할 수 있다.
+라이브러리 내부에 while-true 드라이버를 두지 않음으로써 분산 큐·서버리스·서버 핸들러 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 `QueryEngine.step()`을 재사용할 수 있다.
 
 **왜 `Checkpoint`로 stateless 재개인가?**  
 턴 경계에서 직렬화 가능한 `LoopState`를 방출하면 프로세스 재시작이나 컨테이너 이동 후에도 `step()`에 `Checkpoint.state`를 넘겨 재개할 수 있다. 타입의 `to_dict()`/`from_dict()` 메서드가 JSON 왕복을 담당하며, provider·config는 직렬화 대상에서 제외한다(컨테이너 로컬).

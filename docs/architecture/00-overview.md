@@ -7,8 +7,8 @@
 
 ## 프로젝트 목적
 
-Friday CLI의 **에이전트 루프(agentic loop)** 를 Python으로 재구현한 POC다.  
-단순 복제가 아니라, 루프를 **도메인 무관 + LLM 무관(LLM-agnostic)** 프레임워크로 만들어  
+여러 에이전트 루프(agentic loop) 동작 구조를 분석해, **클라우드/서버 사이드에서 에이전트 루프를 구동**하기 위한  
+**도메인 무관 + LLM 무관(LLM-agnostic)** SDK다.  
 프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표다.
 
 구현체: `friday_agent/` 패키지 (Python 3.11+, `anthropic` + `openai` SDK + `pydantic` + `anyio`).
@@ -17,10 +17,10 @@ Friday CLI의 **에이전트 루프(agentic loop)** 를 Python으로 재구현�
 
 ## 호출자 주도 턴 루프 큰 그림
 
-핵심 설계 원칙은 **라이브러리가 단일 턴 실행(`QueryEngine.step()`)만 노출하고, while-true 드라이버를 호출자에게 외부화**한다는 점이다. 이를 통해 REPL·분산 오케스트레이터 등 다양한 실행 컨텍스트에서 동일한 엔진을 재사용할 수 있다.
+핵심 설계 원칙은 **라이브러리가 단일 턴 실행(`QueryEngine.step()`)만 노출하고, while-true 드라이버를 호출자에게 외부화**한다는 점이다. 이를 통해 분산 오케스트레이터·서버리스 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 엔진을 재사용할 수 있다(로컬 예시 드라이버: `scripts/run_agent.py`).
 
 ```
-호출자 (REPL / 분산 오케스트레이터)
+호출자 (분산 오케스트레이터 / 서버 사이드)
    │  LoopState(messages=[...])
    ▼
 async for item in engine.step(state):   ← AsyncGenerator
@@ -75,7 +75,7 @@ item이 Checkpoint면 state = item.state 갱신 후 step() 재호출, Terminal�
 
 ## 구현 스코프 헌장
 
-명세는 의도적으로 **"에이전트 루프 알고리즘의 본질"** 만 기술한다. 아래 제외 항목은 원본 Friday 소스에 존재하지만 본 POC 범위가 아니다. **임의로 다시 추가하지 말 것**.
+명세는 의도적으로 **"에이전트 루프 알고리즘의 본질"** 만 기술한다. 아래 제외 항목은 분석한 실제 구현들에 존재하지만 본 SDK 범위가 아니다. **임의로 다시 추가하지 말 것**.
 
 | 포함 (par 수준으로 구현) | 제외 (의도적) |
 |---|---|
@@ -100,7 +100,7 @@ LLM_MODEL=<모델ID> python scripts/verify_p2.py   # 도구 오케스트레이�
 LLM_MODEL=<모델ID> python scripts/verify_p3.py   # 컨텍스트 오버플로 · compact 복구
 LLM_MODEL=<모델ID> python scripts/verify_p4.py   # 실 백엔드 엔드투엔드 · 어댑터 교체 실증
 
-# 대화형 에이전트 실행
+# 로컬 예시 드라이버 실행
 python scripts/run_agent.py
 ```
 
