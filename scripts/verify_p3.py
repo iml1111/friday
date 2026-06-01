@@ -23,7 +23,7 @@ _MODEL = os.environ.get("LLM_MODEL", "")
 if not _MODEL:
     sys.exit("Set the LLM_MODEL environment variable to a real model ID.")
 
-from _env import create_provider, resolve_api_key
+from _env import create_config, create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
@@ -81,7 +81,7 @@ async def main() -> int:
 
     provider = create_provider(_MODEL, api_key=resolve_api_key(_MODEL))
     tools = [BigChunkTool()]
-    config = provider.config_type(max_tokens=512)
+    config = create_config(_MODEL, max_tokens=512)
     system_prompt = (
         "You are a data gathering assistant. Call BigChunkTool every turn with a "
         "different query string. Never say you are done; just keep calling the tool."

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 if TYPE_CHECKING:
-    from friday_agent.api.provider import LLMProvider
+    from friday_agent.api.provider import LLMConfig, LLMProvider
 
 load_dotenv()  # load .env if present, silently skip if not
 
@@ -91,6 +91,46 @@ def create_provider(model: str, api_key: str, **kwargs) -> "LLMProvider":
     if model.startswith("gpt-"):
         from friday_agent.api.openai_provider import OpenAIProvider
         return OpenAIProvider(model=model, api_key=api_key, **kwargs)
+
+    raise ValueError(
+        f"Unsupported model prefix: {model!r}. "
+        f"Supported prefixes: {', '.join(_SUPPORTED_PREFIXES)}"
+    )
+
+
+def create_config(model: str, **kwargs) -> "LLMConfig":
+    """Construct the vendor call config matching the given model ID.
+
+    Routes on the model-ID prefix and lazy-imports the matching config dataclass,
+    mirroring create_provider. This is a caller boundary helper — the friday_agent
+    library exposes the config dataclasses directly and intentionally does not ship
+    this factory (it derives a default via provider.config_type()).
+
+    Args:
+        model: Vendor model ID. The prefix determines which config is built.
+        **kwargs: Forwarded verbatim to the selected config constructor
+                  (e.g. max_tokens=, temperature=). Passing a field the vendor
+                  config does not declare raises TypeError (fail-fast).
+
+    Returns:
+        A vendor config instance (AnthropicConfig / OpenAIConfig).
+
+    Raises:
+        ValueError: If model is empty, not a string, or uses an unsupported prefix.
+    """
+    if not isinstance(model, str) or not model:
+        raise ValueError(
+            f"A model ID is required (got {model!r}). "
+            f"Supported prefixes: {', '.join(_SUPPORTED_PREFIXES)}"
+        )
+
+    if model.startswith("claude-"):
+        from friday_agent.api.configs import AnthropicConfig
+        return AnthropicConfig(**kwargs)
+
+    if model.startswith("gpt-"):
+        from friday_agent.api.configs import OpenAIConfig
+        return OpenAIConfig(**kwargs)
 
     raise ValueError(
         f"Unsupported model prefix: {model!r}. "

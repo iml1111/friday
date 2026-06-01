@@ -27,7 +27,7 @@ _MODEL = os.environ.get("LLM_MODEL", "")
 if not _MODEL:
     sys.exit("Set the LLM_MODEL environment variable to a real model ID.")
 
-from _env import create_provider, resolve_api_key
+from _env import create_config, create_provider, resolve_api_key
 from friday_agent.api.provider import LLMProvider
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
@@ -88,7 +88,7 @@ async def run_p4a() -> tuple[bool, str]:
         return False, "routed provider is not an instance of LLMProvider ABC"
 
     tools = [ExampleTool()]
-    config = provider.config_type(max_tokens=512)
+    config = create_config(_MODEL, max_tokens=512)
     system_prompt = (
         "You are a helpful assistant. "
         "When asked to process text, use ExampleTool exactly ONCE with the provided payload. "
@@ -152,7 +152,7 @@ async def run_p4b() -> tuple[bool, str]:
     """External compact recovery across a serialize boundary. Returns (passed, detail)."""
     provider = create_provider(_MODEL, api_key=resolve_api_key(_MODEL))
     tools = [BigChunkTool()]
-    config = provider.config_type(max_tokens=512)
+    config = create_config(_MODEL, max_tokens=512)
     system_prompt = (
         "You are a data gathering assistant. Call BigChunkTool every turn with a "
         "different query string. Never say you are done; just keep calling the tool."

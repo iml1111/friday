@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 _MODEL="claude-sonnet-4-6"
 
-from _env import create_provider, resolve_api_key
+from _env import create_config, create_provider, resolve_api_key
 from friday_agent.api.provider import ContextOverflowError
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
@@ -94,7 +94,7 @@ async def main() -> int:
         provider=provider,
         tools=[ExampleTool()],   # TodoWrite is auto-registered by FridayAgent (built-in)
         system_prompt=_SYSTEM_PROMPT,
-        config=provider.config_type(max_tokens=_MAX_TOKENS),
+        config=create_config(_MODEL, max_tokens=_MAX_TOKENS),
     )
 
     print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite + memory_* are built-in)")
