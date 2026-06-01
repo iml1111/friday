@@ -38,7 +38,7 @@ LLM 백엔드 교체 경계를 정의한다. 모든 completion 호출은 이 레
 |---|---|---|
 | `complete()` | `async (messages, system_prompt, tools, config) -> AssistantResponse` | 단일 completion 호출. 어댑터가 벤더 SDK를 호출하고 응답을 정규화한다. |
 
-클래스 속성 `config_type: type[ConfigT]`는 어댑터가 반드시 설정해야 한다. `QueryEngine`이 config/provider 불일치 검증과 기본 config 생성(`provider.config_type()`)에 사용한다.
+클래스 속성 `config_type: type[ConfigT]`는 어댑터가 반드시 설정해야 한다. `FridayAgent`이 config/provider 불일치 검증과 기본 config 생성(`provider.config_type()`)에 사용한다.
 
 ### 공통 타입
 
@@ -86,7 +86,7 @@ LLMError (base)
 └── TransientError       — 네트워크 타임아웃, 5xx 등 일시적 오류
 ```
 
-`ContextOverflowError`는 어댑터가 400 응답을 판정해 raise하고, 호출자(`QueryEngine.step()` 사용 측)가 `engine.compact(state)` 후 재시도한다.
+`ContextOverflowError`는 어댑터가 400 응답을 판정해 raise하고, 호출자(`FridayAgent.step()` 사용 측)가 `engine.compact(state)` 후 재시도한다.
 
 ### provider 생성
 

@@ -34,7 +34,7 @@ _MODEL="claude-sonnet-4-6"
 
 from _env import create_provider, resolve_api_key
 from friday_agent.api.provider import ContextOverflowError
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import Message, create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
@@ -64,7 +64,7 @@ def _print_new_messages(messages: list[Message]) -> None:
 
 async def main() -> int:
     provider = create_provider(_MODEL, api_key=resolve_api_key(_MODEL))
-    engine = QueryEngine(
+    engine = FridayAgent(
         provider=provider,
         tools=[ExampleTool()],
         system_prompt=_SYSTEM_PROMPT,

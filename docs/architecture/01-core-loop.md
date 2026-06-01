@@ -20,7 +20,7 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 | 경로 | 책임 | 핵심 심볼 |
 |---|---|---|
 | `friday_agent/core/loop.py` | 단일 턴 실행·stop_reason 분기·백필 | `run_one_turn()`, `yield_missing_tool_result_blocks()` |
-| `friday_agent/core/engine.py` | 외부 진입점, provider 직접 주입 | `QueryEngine.step()`, `QueryEngine.compact()` |
+| `friday_agent/core/engine.py` | 외부 진입점, provider 직접 주입 | `FridayAgent.step()`, `FridayAgent.compact()` |
 | `friday_agent/core/state.py` | 루프 상태·종료·재개 타입 + JSON serde | `Terminal`, `LoopState`, `Checkpoint` (`to_dict`/`from_dict`) |
 
 ---
@@ -67,10 +67,10 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 
 ## ④ 공개 API / 확장 포인트
 
-### `QueryEngine` 생성
+### `FridayAgent` 생성
 
 ```python
-QueryEngine(
+FridayAgent(
     provider,              # LLMProvider — 필수
     tools=None,            # list[Tool]
     system_prompt="",
@@ -143,7 +143,7 @@ step(state) → ContextOverflowError 발생
 ## ⑦ 설계 근거(Why)
 
 **왜 단일 턴 step-only인가?**  
-라이브러리 내부에 while-true 드라이버를 두지 않음으로써 분산 큐·서버리스·서버 핸들러 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 `QueryEngine.step()`을 재사용할 수 있다.
+라이브러리 내부에 while-true 드라이버를 두지 않음으로써 분산 큐·서버리스·서버 핸들러 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 `FridayAgent.step()`을 재사용할 수 있다.
 
 **왜 `Checkpoint`로 stateless 재개인가?**  
 턴 경계에서 직렬화 가능한 `LoopState`를 방출하면 프로세스 재시작이나 컨테이너 이동 후에도 `step()`에 `Checkpoint.state`를 넘겨 재개할 수 있다. 타입의 `to_dict()`/`from_dict()` 메서드가 JSON 왕복을 담당하며, provider·config는 직렬화 대상에서 제외한다(컨테이너 로컬).

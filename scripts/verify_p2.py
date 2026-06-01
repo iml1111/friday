@@ -15,7 +15,7 @@ import os
 import sys
 
 from _env import create_provider, resolve_api_key
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import Message, create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
@@ -56,7 +56,7 @@ async def main() -> int:
         "After receiving the tool result, summarize it in one sentence and stop."
     )
 
-    engine = QueryEngine(
+    engine = FridayAgent(
         provider=provider,
         tools=tools,
         system_prompt=system_prompt,

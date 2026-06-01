@@ -47,7 +47,7 @@ engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) �
 호출자가 `async for`로 소비: 마지막 sentinel이 Checkpoint면 state를 넘겨 step()을 다시 호출, Terminal이면 종료.
 ```
 
-> 구현 메모: 라이브러리는 단일 턴 실행 `QueryEngine.step()`만 노출한다 — batch 드라이버(`query()`)·완주 진입점(`submit_message`)·`max_turns`는 제거됐다(에이전트 루프 명세 `02`의 while-true 드라이버를 호출자에게 외부화). 턴 경계에서 직렬화 가능한 `Checkpoint(LoopState)`를 방출해 **stateless 분산 재개**(`QueryEngine.step()` + 타입의 `to_dict()`/`from_dict()`)를 지원한다.
+> 구현 메모: 라이브러리는 단일 턴 실행 `FridayAgent.step()`만 노출한다 — batch 드라이버(`query()`)·완주 진입점(`submit_message`)·`max_turns`는 제거됐다(에이전트 루프 명세 `02`의 while-true 드라이버를 호출자에게 외부화). 턴 경계에서 직렬화 가능한 `Checkpoint(LoopState)`를 방출해 **stateless 분산 재개**(`FridayAgent.step()` + 타입의 `to_dict()`/`from_dict()`)를 지원한다.
 
 핵심 데이터 구조 (`docs/architecture/01-core-loop.md`·`05-messages.md`):
 - **`Message` + `ContentBlock`** — 별도 *Message 클래스 유니온은 없다. 단일 `Message` dataclass(`type` 태그: `user`/`assistant`/`system`)에 flag 필드(`is_compact_summary`/`is_meta`/`is_api_error_message`)뿐이다. 블록도 단일 flat `ContentBlock` dataclass(`type`: `text`/`tool_use`/`tool_result`/`thinking`)로 표현한다.
@@ -89,7 +89,7 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 ## 타겟 스택 & 검증
 
 - **Python 3.11+**, `anthropic` + `openai` SDK + `pydantic` + `anyio`.
-- API 키: **외부 주입 전용**(필수). 라이브러리는 환경변수를 읽지 않는다 — provider 생성 시 어댑터(`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`)에 직접 넘긴다. 키 해석(env→인자)과 모델 prefix(claude-/gpt-)→어댑터 라우팅은 모두 경계 계층 `scripts/_env.py`(`resolve_api_key(model)`·`create_provider(model, api_key=...)`)가 담당한다 — 라이브러리는 라우팅 팩토리를 제공하지 않는다. **`QueryEngine`은 provider를 직접 받는다(필수)** — model/api_key 인자는 없다. 공개 API 면: `engine.step(state)` (단일 턴 비동기 제너레이터 — Message들을 순서대로 yield하고 마지막에 `Checkpoint | Terminal` sentinel 1개를 yield) + `engine.compact(state)` (호출자 주도 compact). 호출 config는 벤더 config를 직접 입력한다(예: `AnthropicConfig(max_tokens=...)` 또는 `provider.config_type(max_tokens=...)`; 미지정 시 `provider.config_type()` 기본값). `context_window`·`max_output_tokens`는 어댑터 생성자, `max_concurrency`는 `QueryEngine(...)`.
+- API 키: **외부 주입 전용**(필수). 라이브러리는 환경변수를 읽지 않는다 — provider 생성 시 어댑터(`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`)에 직접 넘긴다. 키 해석(env→인자)과 모델 prefix(claude-/gpt-)→어댑터 라우팅은 모두 경계 계층 `scripts/_env.py`(`resolve_api_key(model)`·`create_provider(model, api_key=...)`)가 담당한다 — 라이브러리는 라우팅 팩토리를 제공하지 않는다. **`FridayAgent`은 provider를 직접 받는다(필수)** — model/api_key 인자는 없다. 공개 API 면: `engine.step(state)` (단일 턴 비동기 제너레이터 — Message들을 순서대로 yield하고 마지막에 `Checkpoint | Terminal` sentinel 1개를 yield) + `engine.compact(state)` (호출자 주도 compact). 호출 config는 벤더 config를 직접 입력한다(예: `AnthropicConfig(max_tokens=...)` 또는 `provider.config_type(max_tokens=...)`; 미지정 시 `provider.config_type()` 기본값). `context_window`·`max_output_tokens`는 어댑터 생성자, `max_concurrency`는 `FridayAgent(...)`.
 - Phase 검증: 단일 도구(P1) → 병렬 도구 배치(P2) → `ContextOverflowError` → `engine.compact(state)` 호출자 복구(P3).
 
 ## 구현 시 핵심 함정

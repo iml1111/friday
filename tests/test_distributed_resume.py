@@ -6,7 +6,7 @@ import pytest
 from friday_agent.api.provider import (
     AssistantResponse, ContextOverflowError, StopReason, TextBlock, ToolUseBlock, TokenUsage,
 )
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
@@ -51,7 +51,7 @@ async def test_distributed_resume_matches_full_run():
     assert ref_terminal.reason == "completed"
 
     # Distributed: step → (serialize → deserialize) → step loop.
-    dist_engine = QueryEngine(provider=FakeLLMProvider(responses=_scripted_responses()), tools=[ExampleTool()])
+    dist_engine = FridayAgent(provider=FakeLLMProvider(responses=_scripted_responses()), tools=[ExampleTool()])
     collected = []
     msgs, outcome = await collect_turn(dist_engine, LoopState(messages=[create_user_message("run example")]))
     collected.extend(msgs)
@@ -73,7 +73,7 @@ async def test_distributed_resume_matches_full_run():
 @pytest.mark.asyncio
 async def test_checkpoint_state_has_no_dangling_tool_use():
     """Every tool_use in Checkpoint.state.messages has a matching tool_result (pairing invariant)."""
-    engine = QueryEngine(provider=FakeLLMProvider(responses=_scripted_responses()), tools=[ExampleTool()])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=_scripted_responses()), tools=[ExampleTool()])
     _, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("run example")]))
     assert isinstance(outcome, Checkpoint)
     msgs = outcome.state.messages
@@ -95,7 +95,7 @@ async def test_distributed_overflow_recovers_across_serialize_boundary():
         ],
         errors={0: ContextOverflowError("prompt too long")},
     )
-    engine = QueryEngine(provider=fake, tools=[])
+    engine = FridayAgent(provider=fake, tools=[])
     state = LoopState(messages=[create_user_message("long conversation")])
 
     # Worker A: step overflows → compact → serialize the compacted state.

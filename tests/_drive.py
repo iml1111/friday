@@ -1,4 +1,4 @@
-"""Test-side driver: loops QueryEngine.step() to completion, recovering from overflow.
+"""Test-side driver: loops FridayAgent.step() to completion, recovering from overflow.
 
 Consumer-side replacement for the removed query(). Lives in tests/ (not the
 library) to prove that both the turn loop AND context recovery are trivial caller
@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import AsyncGenerator
 
 from friday_agent.api.provider import ContextOverflowError, LLMConfig, LLMProvider
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import Message
 from friday_agent.tools.base import Tool
@@ -25,11 +25,11 @@ async def drive(
     config: LLMConfig | None = None,
     max_concurrency: int = 10,
 ) -> AsyncGenerator[Message | Terminal, None]:
-    """Drive QueryEngine.step() to completion, compacting on context overflow.
+    """Drive FridayAgent.step() to completion, compacting on context overflow.
 
     Yields every Message produced across turns, then yields the final Terminal.
     """
-    engine = QueryEngine(
+    engine = FridayAgent(
         provider=provider,
         tools=tools if tools is not None else [],
         system_prompt=system_prompt,
@@ -55,7 +55,7 @@ async def drive(
 
 
 async def collect_turn(
-    engine: QueryEngine, state: LoopState
+    engine: FridayAgent, state: LoopState
 ) -> "tuple[list[Message], Checkpoint | Terminal]":
     """Drain one engine.step() turn → (messages, final sentinel). Test convenience.
 

@@ -111,7 +111,7 @@ class LLMProvider(ABC, Generic[ConfigT]):
     response to AssistantResponse.
 
     Subclasses must set ``config_type`` to their vendor config class.
-    This is used both for config/provider mismatch validation in QueryEngine
+    This is used both for config/provider mismatch validation in FridayAgent
     and for default config creation when no config is supplied
     (``provider.config_type()``).
     """

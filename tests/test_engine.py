@@ -1,4 +1,4 @@
-"""QueryEngine entry-point tests.
+"""FridayAgent entry-point tests.
 
 Verifies the step() API and the tests/_drive.py driver:
   - drive() runs a conversation to completion (Terminal reason="completed").
@@ -12,7 +12,7 @@ import pytest
 from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
 from friday_agent.context.compact import SUMMARIZER_SYSTEM_PROMPT
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
@@ -98,13 +98,13 @@ async def test_drive_returns_collected_messages():
 def test_provider_is_required():
     """provider is a required argument; omitting it raises TypeError."""
     with pytest.raises(TypeError):
-        QueryEngine(tools=[])
+        FridayAgent(tools=[])
 
 
 @pytest.mark.asyncio
 async def test_step_single_turn_completed():
     end = AssistantResponse(content=[TextBlock(text="hello")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
-    engine = QueryEngine(provider=FakeLLMProvider(responses=[end]), tools=[])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[end]), tools=[])
 
     msgs, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("hi")]))
 
@@ -121,7 +121,7 @@ async def test_step_resumes_to_completion():
         stop_reason=StopReason.TOOL_USE, usage=TokenUsage(),
     )
     end = AssistantResponse(content=[TextBlock(text="done")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
-    engine = QueryEngine(provider=FakeLLMProvider(responses=[tool_use, end]), tools=[ExampleTool()])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[tool_use, end]), tools=[ExampleTool()])
 
     _, outcome1 = await collect_turn(engine, LoopState(messages=[create_user_message("run example")]))
     assert isinstance(outcome1, Checkpoint)
@@ -141,7 +141,7 @@ async def test_compact_summarizes_to_single_message():
         stop_reason=StopReason.END_TURN,
         usage=TokenUsage(),
     )
-    engine = QueryEngine(provider=FakeLLMProvider(responses=[summary]), tools=[])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[summary]), tools=[])
     state = LoopState(
         messages=[create_user_message("m1"), create_user_message("m2"), create_user_message("m3")],
         turn_count=7,
@@ -164,7 +164,7 @@ async def test_compact_falls_back_to_raw_text_without_summary_tags():
         stop_reason=StopReason.END_TURN,
         usage=TokenUsage(),
     )
-    engine = QueryEngine(provider=FakeLLMProvider(responses=[raw]), tools=[])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[raw]), tools=[])
     new_state = await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=2))
     assert len(new_state.messages) == 1
     assert new_state.messages[0].is_compact_summary is True
@@ -183,7 +183,7 @@ async def test_compact_does_not_inject_general_guidance():
         usage=TokenUsage(),
     )
     fake = FakeLLMProvider(responses=[summary])
-    engine = QueryEngine(provider=fake, tools=[], system_prompt="You are a domain assistant.")
+    engine = FridayAgent(provider=fake, tools=[], system_prompt="You are a domain assistant.")
     await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
     assert GENERAL_AGENT_GUIDANCE not in fake.received_system_prompts[0]
     assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT

@@ -4,7 +4,7 @@
 **도메인 무관 + LLM 무관(LLM-agnostic)** SDK입니다.
 프로그래밍 외 다양한 목적의 AI 에이전트를 만드는 토대로 삼는 것이 목표입니다.
 
-핵심은 호출자가 `QueryEngine.step()`을 반복해 구동하는 턴 루프입니다:
+핵심은 호출자가 `FridayAgent.step()`을 반복해 구동하는 턴 루프입니다:
 
 ```
 사용자 메시지 → LLM 호출 → stop_reason 분기
@@ -20,7 +20,7 @@
 
 ## 🧭 구현 가이드 — 코드 리뷰용
 
-핵심 구현은 전부 `friday_agent/` 안에 있습니다. 진입점은 `friday_agent/core/engine.py` › `QueryEngine.step(state)` / `QueryEngine.compact(state)`이고, 루프 심장은 `friday_agent/core/loop.py` › `run_one_turn()`입니다.
+핵심 구현은 전부 `friday_agent/` 안에 있습니다. 진입점은 `friday_agent/core/engine.py` › `FridayAgent.step(state)` / `FridayAgent.compact(state)`이고, 루프 심장은 `friday_agent/core/loop.py` › `run_one_turn()`입니다.
 
 턴 루프 한 바퀴:
 
@@ -64,16 +64,16 @@ pip install -e ".[dev]"
 
 API 키는 **라이브러리(`friday_agent`) 내부에서 환경변수를 읽지 않습니다** — 항상
 provider 생성자(어댑터)에 `api_key=`로 **외부에서 주입**합니다(필수). 키를 어디서
-가져올지(환경변수·시크릿 매니저 등)는 호출하는 애플리케이션의 책임입니다. `QueryEngine`은
+가져올지(환경변수·시크릿 매니저 등)는 호출하는 애플리케이션의 책임입니다. `FridayAgent`은
 이렇게 만든 provider를 직접 받습니다(model/api_key 인자 없음).
 
 ```python
 import os
 from friday_agent.api.anthropic_provider import AnthropicProvider
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 
 provider = AnthropicProvider(model="claude-sonnet-4-6", api_key=os.environ["ANTHROPIC_API_KEY"])
-engine = QueryEngine(provider=provider, ...)
+engine = FridayAgent(provider=provider, ...)
 ```
 
 검증 스크립트(`scripts/verify_*.py`, `run_agent.py`)는 이 "경계 계층" 역할을 하며,
@@ -100,9 +100,9 @@ OPENAI_API_KEY=sk-...            # gpt-* 모델 사용 시
 |---|---|---|---|
 | `api_key` | 어댑터(`AnthropicProvider(api_key=...)` / `OpenAIProvider(api_key=...)`) | (없음, 필수) | 벤더 API 키. 외부 주입 전용(환경변수 폴백 없음). provider 생성 시점에 주입 |
 | `model` | 어댑터(`AnthropicProvider(model=...)`) | (없음) | 모델 ID. prefix 자동 라우팅이 필요하면 caller가 처리(예: `scripts/_env.py`의 `create_provider`) |
-| `config` | `QueryEngine(config=...)` (예: `AnthropicConfig(max_tokens=...)` / `provider.config_type(max_tokens=...)`) | `provider.config_type()` | 벤더 호출 config를 직접 주입 |
+| `config` | `FridayAgent(config=...)` (예: `AnthropicConfig(max_tokens=...)` / `provider.config_type(max_tokens=...)`) | `provider.config_type()` | 벤더 호출 config를 직접 주입 |
 | `max_tokens` | 벤더 config 필드 (예: `provider.config_type(max_tokens=...)`) | `16384` | 응답당 최대 출력 토큰 |
-| `max_concurrency` | `QueryEngine(max_concurrency=...)` | `10` | 도구 병렬 실행 최대 동시성 |
+| `max_concurrency` | `FridayAgent(max_concurrency=...)` | `10` | 도구 병렬 실행 최대 동시성 |
 
 ---
 
@@ -112,12 +112,12 @@ OPENAI_API_KEY=sk-...            # gpt-* 모델 사용 시
 최종 답변으로 종료하기까지 호출자가 `step()`을 반복해 구동합니다.
 
 ```python
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Checkpoint, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = QueryEngine(provider=provider, tools=[...])
+engine = FridayAgent(provider=provider, tools=[...])
 state = LoopState(messages=[create_user_message("질문")])
 while True:
     try:
@@ -202,7 +202,7 @@ class WeatherTool(Tool):
         return ToolResult(data=f"{parsed.city}는 맑음")
 ```
 
-만든 도구를 `QueryEngine(tools=[WeatherTool()])`에 넘기면 모델이 호출할 수 있습니다.
+만든 도구를 `FridayAgent(tools=[WeatherTool()])`에 넘기면 모델이 호출할 수 있습니다.
 
 ### LLM은 도구를 어떻게 인지하는가
 

@@ -17,7 +17,7 @@
 
 ## 호출자 주도 턴 루프 큰 그림
 
-핵심 설계 원칙은 **라이브러리가 단일 턴 실행(`QueryEngine.step()`)만 노출하고, while-true 드라이버를 호출자에게 외부화**한다는 점이다. 이를 통해 분산 오케스트레이터·서버리스 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 엔진을 재사용할 수 있다(로컬 예시 드라이버: `scripts/run_agent.py`).
+핵심 설계 원칙은 **라이브러리가 단일 턴 실행(`FridayAgent.step()`)만 노출하고, while-true 드라이버를 호출자에게 외부화**한다는 점이다. 이를 통해 분산 오케스트레이터·서버리스 등 다양한 서버 사이드 실행 컨텍스트에서 동일한 엔진을 재사용할 수 있다(로컬 예시 드라이버: `scripts/run_agent.py`).
 
 ```
 호출자 (분산 오케스트레이터 / 서버 사이드)
@@ -63,7 +63,7 @@ item이 Checkpoint면 state = item.state 갱신 후 step() 재호출, Terminal�
 | 순서 | 문서 | 핵심 내용 |
 |---|---|---|
 | 00 | 이 문서 | 목적·큰 그림·모듈 지도·스코프 |
-| 01 | [01-core-loop](01-core-loop.md) | `run_one_turn()`, `QueryEngine.step()`, 상태 흐름 |
+| 01 | [01-core-loop](01-core-loop.md) | `run_one_turn()`, `FridayAgent.step()`, 상태 흐름 |
 | 02 | [02-tool-orchestration](02-tool-orchestration.md) | 도구 파티셔닝·병렬/순차 실행·순서 보존 |
 | 03 | [03-llm-providers](03-llm-providers.md) | `LLMProvider` 추상화·Anthropic·OpenAI 어댑터 |
 | 04 | [04-context-compaction](04-context-compaction.md) | `ContextOverflowError`·`engine.compact()`·요약 전략 |
@@ -108,7 +108,7 @@ python scripts/run_agent.py
 
 ## 설계 근거(Why) 요약
 
-라이브러리는 단일 턴 `QueryEngine.step()`만 노출하고 while-true 드라이버를 호출자에게 외부화했다. 이 결정의 핵심 이점은 두 가지다.
+라이브러리는 단일 턴 `FridayAgent.step()`만 노출하고 while-true 드라이버를 호출자에게 외부화했다. 이 결정의 핵심 이점은 두 가지다.
 
 1. **stateless 분산 재개** — 턴 경계마다 직렬화 가능한 `Checkpoint(LoopState)`를 방출하므로, 프로세스 재시작이나 분산 큐 환경에서도 상태를 복원할 수 있다. JSON serde는 타입(`Checkpoint`/`LoopState`/`Message`)의 `to_dict()`/`from_dict()` 메서드가 담당한다.
 2. **컨텍스트 관리 책임 분리** — `ContextOverflowError`를 호출자에게 전파함으로써 라이브러리 내부를 단순하게 유지하고, compact 전략(타이밍·요약 방식)을 호출자가 직접 제어하게 한다 (`engine.compact(state)`).

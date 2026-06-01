@@ -14,7 +14,7 @@
 | 경로 | 책임 | 핵심 심볼 |
 |---|---|---|
 | `friday_agent/context/compact.py` | 대화 요약 생성·요약 메시지 구성 | `compact_conversation()`, `create_compact_summary_message()`, `COMPACT_PROMPT`, `MAX_OUTPUT_TOKENS_FOR_SUMMARY` |
-| `friday_agent/core/engine.py` | compact 진입점 | `QueryEngine.compact()` |
+| `friday_agent/core/engine.py` | compact 진입점 | `FridayAgent.compact()` |
 
 ---
 
