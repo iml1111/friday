@@ -180,7 +180,7 @@ The `TodoWrite` tool is always registered, and the todo usage guidance (`TODO_GU
 
 ### Persistent Memory
 
-Persists typed facts (user/feedback/project/reference) long-term across session boundaries. The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) and the tools `memory_save`/`memory_read`/`memory_delete` are always registered, and the memory instructions + automatic index are injected into the system prompt once at session start in `step()`.
+Persists typed facts (user/feedback/project/reference) long-term across session boundaries. The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) and the tools `memory_save`/`memory_read`/`memory_delete` are always registered, and the memory instructions + automatic index are reassembled every turn in `step()` and injected into the system prompt (no caching — on distributed resume the index freshly reflects the store state at resume time).
 
 A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**, so injecting your own store replaces the default store and tools wholesale:
 
@@ -262,7 +262,7 @@ So getting the LLM to recognize a tool "well" comes down to **writing these thre
 | `input_schema` | Pydantic model returned by `input_schema()` | Put `Field(description=...)` on every field. Types·required·defaults are serialized automatically by Pydantic |
 
 > To change the description dynamically based on input instead of a static docstring, override the `description()` method (defaults to the docstring).
-> Of the Pydantic v2 meta-keys, only the top-level `title`/`$defs` are removed; as shown above, **per-field `title` remains** — this is expected.
+> The top-level `title` is removed, and `$defs` are expanded inline and then removed (nested models·enums are exposed as-is without `$ref` — e.g. `status` enum values appear directly in the schema). As shown above, **per-field `title` remains** — this is expected.
 
 ### Execution Policy Methods Are Not Sent to the LLM
 

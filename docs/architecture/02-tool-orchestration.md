@@ -157,13 +157,13 @@ ToolResult(
 
 ### `get_tool_schema()`
 
-`tools/base.py:124` — removes `title` and `$defs` from the Pydantic v2 schema and returns it in the form passed to the API.
+`tools/base.py:80` — inlines and removes `$defs` from the Pydantic v2 schema, removes the top-level `title`, then returns it in the form passed to the API. Inlining (`_inline_defs`) ensures nested models · enums (e.g. `TodoItem.status`) are exposed to the model as-is without dangling `$ref`s — otherwise only `$ref` remains and the model cannot see the enum constraint.
 
 ```python
 {
     "name": self.name,
     "description": "...",
-    "input_schema": { ... }  # title, $defs removed
+    "input_schema": { ... }  # top-level title removed; $defs inlined then removed
 }
 ```
 
