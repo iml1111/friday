@@ -1,7 +1,7 @@
 # 00. 개요 (Overview)
 
 `friday_agent/` 패키지의 아키텍처 전체를 한눈에 파악하기 위한 진입점 문서다.  
-상세 구현은 하위 번호 문서(01–06)에서 다룬다.
+상세 구현은 하위 번호 문서(01–08)에서 다룬다.
 
 ---
 
@@ -53,12 +53,13 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (횡단) | par-critical 불변식 | [06-invariants](06-invariants.md) |
 | (횡단) | 전 데이터 모델 카탈로그 | [07-data-models](07-data-models.md) |
+| `memory/` | `store.py`·`tool.py`·`prompt.py` — 영속 메모리 서브시스템. always-on 빌트인, `MemoryStore` 주입으로 교체 | [08-memory](08-memory.md) |
 
 ---
 
 ## 읽는 순서
 
-00 → 01 → 02 → 03 → 04 → 05 → 06 (→ 07 참조)
+00 → 01 → 02 → 03 → 04 → 05 → 06 (→ 07 참조) (→ 08 메모리)
 
 | 순서 | 문서 | 핵심 내용 |
 |---|---|---|
@@ -70,6 +71,7 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | 05 | [05-messages](05-messages.md) | Message 유니온 타입·`normalize_for_api()` |
 | 06 | [06-invariants](06-invariants.md) | par-critical 불변식·`tool_use`↔`tool_result` 정합성 |
 | 07 | [07-data-models](07-data-models.md) | 전 데이터 모델 필드·직렬화 경계 카탈로그 (참조용) |
+| 08 | [08-memory](08-memory.md) | 영속 메모리 서브시스템·`MemoryStore` 교체 seam·분산 안전 |
 
 ---
 

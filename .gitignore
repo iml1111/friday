@@ -22,3 +22,6 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# Default FileMemoryStore output (local dev convenience)
+FRIDAY_MEMORY.md

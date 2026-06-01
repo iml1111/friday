@@ -26,6 +26,11 @@ TodoWrite; the tracked list is re-injected into every turn's API view as a
 LoopState.todos). The live list is printed under a "── todo list ──" header whenever
 it changes so you can watch progress.
 
+Memory is always-on too: FridayAgent registers memory_save / memory_read /
+memory_delete from a default FileMemoryStore, which persists to FRIDAY_MEMORY.md in
+the working directory across runs. Inject your own MemoryStore (FridayAgent(...,
+memory=YourStore())) to replace the backend and its tools.
+
 Cost guardrail: max_tokens=1024; caller-side turn cap = 30 per input to limit spend.
 """
 from __future__ import annotations
@@ -92,7 +97,7 @@ async def main() -> int:
         config=provider.config_type(max_tokens=_MAX_TOKENS),
     )
 
-    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite is built-in)")
+    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite + memory_* are built-in)")
     print("Enter a prompt. To quit: exit / quit / Ctrl-D\n")
 
     history: list[Message] = []
