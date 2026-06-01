@@ -4,7 +4,7 @@ Built by analyzing how several agent loops (agentic loops) work, this is a **dom
 for **running agent loops on the cloud/server side**.
 The goal is to serve as a foundation for building AI agents for a wide range of purposes beyond programming.
 
-The core is a turn loop that the caller drives by repeatedly calling `QueryEngine.step()`:
+The core is a turn loop that the caller drives by repeatedly calling `FridayAgent.step()`:
 
 ```
 User message → LLM call → stop_reason branch
@@ -20,7 +20,7 @@ User message → LLM call → stop_reason branch
 
 ## 🧭 Implementation Guide — for Code Review
 
-All the core implementation lives in `friday_agent/`. The entry point is `friday_agent/core/engine.py` › `QueryEngine.step(state)` / `QueryEngine.compact(state)`, and the heart of the loop is `friday_agent/core/loop.py` › `run_one_turn()`.
+All the core implementation lives in `friday_agent/`. The entry point is `friday_agent/core/engine.py` › `FridayAgent.step(state)` / `FridayAgent.compact(state)`, and the heart of the loop is `friday_agent/core/loop.py` › `run_one_turn()`.
 
 One pass of the turn loop:
 
@@ -64,16 +64,16 @@ Installed dependencies: `anthropic`, `openai`, `pydantic`, `anyio`, `python-dote
 
 API keys are **not read from environment variables inside the library (`friday_agent`)** — they are always
 **injected externally** via `api_key=` into the provider constructor (adapter) (required). Where to get the
-key from (environment variables·secret manager, etc.) is the calling application's responsibility. `QueryEngine`
+key from (environment variables·secret manager, etc.) is the calling application's responsibility. `FridayAgent`
 takes the provider built this way directly (no model/api_key arguments).
 
 ```python
 import os
 from friday_agent.api.anthropic_provider import AnthropicProvider
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 
 provider = AnthropicProvider(model="claude-sonnet-4-6", api_key=os.environ["ANTHROPIC_API_KEY"])
-engine = QueryEngine(provider=provider, ...)
+engine = FridayAgent(provider=provider, ...)
 ```
 
 The verification scripts (`scripts/verify_*.py`, `run_agent.py`) act as this "boundary layer",
@@ -100,9 +100,9 @@ Settings other than keys are also specified as **constructor arguments, not envi
 |---|---|---|---|
 | `api_key` | Adapter (`AnthropicProvider(api_key=...)` / `OpenAIProvider(api_key=...)`) | (none, required) | Vendor API key. External injection only (no environment-variable fallback). Injected when the provider is created |
 | `model` | Adapter (`AnthropicProvider(model=...)`) | (none) | Model ID. If automatic prefix routing is needed, the caller handles it (e.g. `create_provider` in `scripts/_env.py`) |
-| `config` | `QueryEngine(config=...)` (e.g. `AnthropicConfig(max_tokens=...)` / `provider.config_type(max_tokens=...)`) | `provider.config_type()` | Inject the vendor call config directly |
+| `config` | `FridayAgent(config=...)` (e.g. `AnthropicConfig(max_tokens=...)` / `provider.config_type(max_tokens=...)`) | `provider.config_type()` | Inject the vendor call config directly |
 | `max_tokens` | Vendor config field (e.g. `provider.config_type(max_tokens=...)`) | `16384` | Max output tokens per response |
-| `max_concurrency` | `QueryEngine(max_concurrency=...)` | `10` | Max concurrency for parallel tool execution |
+| `max_concurrency` | `FridayAgent(max_concurrency=...)` | `10` | Max concurrency for parallel tool execution |
 
 ---
 
@@ -112,12 +112,12 @@ The smallest agent loop — put in a single user message, and the caller drives 
 calls a tool and then finishes with a final answer.
 
 ```python
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Checkpoint, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = QueryEngine(provider=provider, tools=[...])
+engine = FridayAgent(provider=provider, tools=[...])
 state = LoopState(messages=[create_user_message("Question")])
 while True:
     try:
@@ -202,7 +202,7 @@ class WeatherTool(Tool):
         return ToolResult(data=f"Sunny in {parsed.city}")
 ```
 
-Pass the tool you built to `QueryEngine(tools=[WeatherTool()])` and the model can call it.
+Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model can call it.
 
 ### How the LLM Recognizes Tools
 

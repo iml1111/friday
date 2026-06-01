@@ -1,4 +1,4 @@
-"""QueryEngine — external entry point that runs one turn of the agent loop.
+"""FridayAgent — external entry point that runs one turn of the agent loop.
 
 Holds the provider, tools, and call configuration, and exposes step(state): an
 async generator that yields each Message produced during the turn (assistant
@@ -19,14 +19,14 @@ from friday_agent.messages.types import Message
 from friday_agent.tools.base import Tool
 
 
-class QueryEngine:
+class FridayAgent:
     """External entry point for the agent loop.
 
     Runs one turn per step() call; the caller drives the turn loop.
     A provider instance is required and injected directly; build one by
     instantiating a vendor adapter (e.g. AnthropicProvider(api_key=..., model=...)
     or OpenAIProvider(api_key=..., model=...)). The provider already holds its
-    credentials, so QueryEngine takes no model or api_key argument.
+    credentials, so FridayAgent takes no model or api_key argument.
 
     Args:
         provider: LLM backend instance (LLMProvider implementation). Required.
@@ -55,7 +55,7 @@ class QueryEngine:
             config = provider.config_type()
         elif not isinstance(config, provider.config_type):
             raise ValueError(
-                f"QueryEngine: provider({type(provider).__name__}) expects "
+                f"FridayAgent: provider({type(provider).__name__}) expects "
                 f"{provider.config_type.__name__} but received "
                 f"{type(config).__name__}. Match the config type to the model vendor."
             )

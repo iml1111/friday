@@ -38,7 +38,7 @@ The `api/` package consolidates three responsibilities into a single swap bounda
 |---|---|---|
 | `complete()` | `async (messages, system_prompt, tools, config) -> AssistantResponse` | Single completion call. The adapter calls the vendor SDK and normalizes the response. |
 
-The class attribute `config_type: type[ConfigT]` must be set by the adapter. `QueryEngine` uses it to validate config/provider mismatches and to build the default config (`provider.config_type()`).
+The class attribute `config_type: type[ConfigT]` must be set by the adapter. `FridayAgent` uses it to validate config/provider mismatches and to build the default config (`provider.config_type()`).
 
 ### Common Types
 
@@ -86,7 +86,7 @@ LLMError (base)
 └── TransientError       — transient errors, e.g. network timeout, 5xx
 ```
 
-`ContextOverflowError` is raised by the adapter after classifying a 400 response; the caller (the side using `QueryEngine.step()`) retries after `engine.compact(state)`.
+`ContextOverflowError` is raised by the adapter after classifying a 400 response; the caller (the side using `FridayAgent.step()`) retries after `engine.compact(state)`.
 
 ### Provider Construction
 

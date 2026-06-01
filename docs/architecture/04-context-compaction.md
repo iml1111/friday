@@ -14,7 +14,7 @@ The loop then recovers when the caller retries `step()`.
 | Path | Responsibility | Key Symbols |
 |---|---|---|
 | `friday_agent/context/compact.py` | Conversation summary generation · summary message construction | `compact_conversation()`, `create_compact_summary_message()`, `COMPACT_PROMPT`, `MAX_OUTPUT_TOKENS_FOR_SUMMARY` |
-| `friday_agent/core/engine.py` | compact entry point | `QueryEngine.compact()` |
+| `friday_agent/core/engine.py` | compact entry point | `FridayAgent.compact()` |
 
 ---
 

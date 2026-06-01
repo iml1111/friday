@@ -19,7 +19,7 @@ from friday_agent.api.provider import (
     TextBlock,
     TokenUsage,
 )
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from tests._drive import drive
@@ -46,7 +46,7 @@ def _end_turn_response(text: str = "final answer") -> AssistantResponse:
 async def test_step_raises_context_overflow():
     """step() propagates ContextOverflowError instead of recovering internally."""
     fake = FakeLLMProvider(responses=[], errors={0: ContextOverflowError("prompt too long")})
-    engine = QueryEngine(provider=fake, tools=[])
+    engine = FridayAgent(provider=fake, tools=[])
 
     with pytest.raises(ContextOverflowError):
         async for _ in engine.step(LoopState(messages=[create_user_message("assume a long conversation")])):
@@ -57,7 +57,7 @@ async def test_step_raises_context_overflow():
 async def test_compact_shrinks_to_single_summary():
     """engine.compact() summarizes history into one summary message, preserving turn_count."""
     fake = FakeLLMProvider(responses=[_summary_response("SHRUNK")])
-    engine = QueryEngine(provider=fake, tools=[])
+    engine = FridayAgent(provider=fake, tools=[])
     state = LoopState(
         messages=[create_user_message("a"), create_user_message("b"), create_user_message("c")],
         turn_count=4,

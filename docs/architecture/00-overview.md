@@ -17,7 +17,7 @@ Implementation: `friday_agent/` package (Python 3.11+, `anthropic` + `openai` SD
 
 ## Big Picture: Caller-Driven Turn Loop
 
-The core design principle is that **the library exposes only single-turn execution (`QueryEngine.step()`) and externalizes the while-true driver to the caller**. This lets the same engine be reused across diverse server-side execution contexts such as distributed orchestrators and serverless (local example driver: `scripts/run_agent.py`).
+The core design principle is that **the library exposes only single-turn execution (`FridayAgent.step()`) and externalizes the while-true driver to the caller**. This lets the same engine be reused across diverse server-side execution contexts such as distributed orchestrators and serverless (local example driver: `scripts/run_agent.py`).
 
 ```
 Caller (distributed orchestrator / server side)
@@ -63,7 +63,7 @@ Emitting a serializable `Checkpoint(LoopState)` at each turn boundary supports *
 | Order | Doc | Key Content |
 |---|---|---|
 | 00 | This doc | Purpose · big picture · module map · scope |
-| 01 | [01-core-loop](01-core-loop.md) | `run_one_turn()`, `QueryEngine.step()`, state flow |
+| 01 | [01-core-loop](01-core-loop.md) | `run_one_turn()`, `FridayAgent.step()`, state flow |
 | 02 | [02-tool-orchestration](02-tool-orchestration.md) | Tool partitioning · parallel/sequential execution · order preservation |
 | 03 | [03-llm-providers](03-llm-providers.md) | `LLMProvider` abstraction · Anthropic · OpenAI adapters |
 | 04 | [04-context-compaction](04-context-compaction.md) | `ContextOverflowError` · `engine.compact()` · summarization strategy |
@@ -108,7 +108,7 @@ python scripts/run_agent.py
 
 ## Design Rationale (Why) Summary
 
-The library exposes only the single-turn `QueryEngine.step()` and externalizes the while-true driver to the caller. This decision has two key benefits.
+The library exposes only the single-turn `FridayAgent.step()` and externalizes the while-true driver to the caller. This decision has two key benefits.
 
 1. **Stateless distributed resume** — since a serializable `Checkpoint(LoopState)` is emitted at every turn boundary, state can be restored even across process restarts or in distributed-queue environments. JSON serde is handled by the types' (`Checkpoint`/`LoopState`/`Message`) `to_dict()`/`from_dict()` methods.
 2. **Separation of context-management responsibility** — propagating `ContextOverflowError` to the caller keeps the library internals simple and lets the caller directly control the compact strategy (timing · summarization method) (`engine.compact(state)`).

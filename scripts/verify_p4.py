@@ -29,7 +29,7 @@ if not _MODEL:
 
 from _env import create_provider, resolve_api_key
 from friday_agent.api.provider import LLMProvider
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
@@ -95,7 +95,7 @@ async def run_p4a() -> tuple[bool, str]:
         "After receiving the tool result, summarize it in one sentence and stop."
     )
 
-    engine = QueryEngine(
+    engine = FridayAgent(
         provider=provider,
         tools=tools,
         system_prompt=system_prompt,
@@ -157,7 +157,7 @@ async def run_p4b() -> tuple[bool, str]:
         "You are a data gathering assistant. Call BigChunkTool every turn with a "
         "different query string. Never say you are done; just keep calling the tool."
     )
-    engine = QueryEngine(provider=provider, tools=tools, system_prompt=system_prompt, config=config)
+    engine = FridayAgent(provider=provider, tools=tools, system_prompt=system_prompt, config=config)
 
     _CAP = 6
     state = LoopState(messages=[create_user_message(

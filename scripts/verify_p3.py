@@ -24,7 +24,7 @@ if not _MODEL:
     sys.exit("Set the LLM_MODEL environment variable to a real model ID.")
 
 from _env import create_provider, resolve_api_key
-from friday_agent.core.engine import QueryEngine
+from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import Checkpoint, LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
@@ -86,7 +86,7 @@ async def main() -> int:
         "You are a data gathering assistant. Call BigChunkTool every turn with a "
         "different query string. Never say you are done; just keep calling the tool."
     )
-    engine = QueryEngine(provider=provider, tools=tools, system_prompt=system_prompt, config=config)
+    engine = FridayAgent(provider=provider, tools=tools, system_prompt=system_prompt, config=config)
 
     _CAP = 6
     state = LoopState(messages=[create_user_message(

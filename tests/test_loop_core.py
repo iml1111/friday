@@ -1,6 +1,6 @@
 """Core agent-loop tests driven via tests/_drive.py (drive()).
 
-drive() loops QueryEngine.step() to completion, streaming Messages and yielding
+drive() loops FridayAgent.step() to completion, streaming Messages and yielding
 a Terminal as the final item. The caller detects completion by seeing a Terminal.
 """
 import pytest

@@ -20,7 +20,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 | Path | Responsibility | Key Symbols |
 |---|---|---|
 | `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · backfill | `run_one_turn()`, `yield_missing_tool_result_blocks()` |
-| `friday_agent/core/engine.py` | External entry point, direct provider injection | `QueryEngine.step()`, `QueryEngine.compact()` |
+| `friday_agent/core/engine.py` | External entry point, direct provider injection | `FridayAgent.step()`, `FridayAgent.compact()` |
 | `friday_agent/core/state.py` | Loop state · termination · resume types + JSON serde | `Terminal`, `LoopState`, `Checkpoint` (`to_dict`/`from_dict`) |
 
 ---
@@ -67,10 +67,10 @@ When a turn is aborted by `LLMError`, `friday_agent/core/loop.py:75` › `yield_
 
 ## ④ Public API / Extension Points
 
-### Constructing `QueryEngine`
+### Constructing `FridayAgent`
 
 ```python
-QueryEngine(
+FridayAgent(
     provider,              # LLMProvider — required
     tools=None,            # list[Tool]
     system_prompt="",
@@ -143,7 +143,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 ## ⑦ Design Rationale (Why)
 
 **Why single-turn step-only?**  
-By not placing a while-true driver inside the library, the same `QueryEngine.step()` can be reused across diverse server-side execution contexts such as distributed queues · serverless · server handlers.
+By not placing a while-true driver inside the library, the same `FridayAgent.step()` can be reused across diverse server-side execution contexts such as distributed queues · serverless · server handlers.
 
 **Why stateless resume via `Checkpoint`?**  
 Emitting a serializable `LoopState` at the turn boundary means that even after a process restart or container move, resuming is just passing `Checkpoint.state` to `step()`. The types' `to_dict()`/`from_dict()` methods handle the JSON round-trip, and provider · config are excluded from serialization (container-local).
