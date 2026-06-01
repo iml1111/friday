@@ -74,3 +74,12 @@ async def test_memory_delete_delegates_to_store():
     result = await MemoryDelete(store).call({"name": "u"})
     assert result.is_error is False
     assert await store.read("u") is None
+
+
+def test_memory_save_schema_exposes_memory_types():
+    import json
+
+    blob = json.dumps(MemorySave(InMemoryStore()).get_tool_schema()["input_schema"])
+    assert "$ref" not in blob
+    # The MemoryType enum is factored into $defs; it must be inlined for the model.
+    assert all(t in blob for t in ("user", "feedback", "project", "reference"))
