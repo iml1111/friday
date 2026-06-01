@@ -11,8 +11,7 @@ from friday_agent.api.provider import (
 )
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState
-from friday_agent.memory.prompt import MEMORY_INSTRUCTIONS
-from friday_agent.memory.store import InMemoryStore
+from friday_agent.memory.store import MEMORY_INSTRUCTIONS, InMemoryStore
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
 from tests._drive import collect_turn

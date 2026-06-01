@@ -13,8 +13,7 @@ from typing import AsyncGenerator
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
-from friday_agent.memory.prompt import build_memory_section
-from friday_agent.memory.store import FileMemoryStore, MemoryStore
+from friday_agent.memory.store import FileMemoryStore, MemoryStore, build_memory_section
 from friday_agent.core.loop import run_one_turn
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api

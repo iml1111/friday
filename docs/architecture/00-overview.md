@@ -55,7 +55,7 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (횡단) | par-critical 불변식 | [06-invariants](06-invariants.md) |
 | (횡단) | 전 데이터 모델 카탈로그 | [07-data-models](07-data-models.md) |
-| `memory/` | `store.py`·`tool.py`·`prompt.py` — 영속 메모리 서브시스템. always-on 빌트인, `MemoryStore` 주입으로 교체 | [08-memory](08-memory.md) |
+| `memory/` | `store.py`·`tool.py` — 영속 메모리 서브시스템. always-on 빌트인, `MemoryStore` 주입으로 교체 | [08-memory](08-memory.md) |
 
 ---
 

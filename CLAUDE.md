@@ -86,7 +86,7 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 - **Phase 2 — 도구 오케스트레이션**: 파티셔닝 + 병렬 실행(`asyncio.gather` + `Semaphore`) + 블록 순서 보존. `tools/orchestrator.py`.
 - **Phase 3 — 컨텍스트 관리**: 외부 compact + 오버플로 전파(호출자 주도). `step()`이 `ContextOverflowError`를 던지면 호출자가 `engine.compact(state)`로 축소 후 재시도한다. `context/compact.py`(요약 전용), `messages/normalize.py`. 컴팩션 동작 상세는 `docs/architecture/04-context-compaction.md` 참조.
 
-실제 패키지 구조(`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `context/`(compact — 요약 전용, recovery.py 없음) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool·prompt). 파일별 책임은 `docs/architecture/00-overview.md#모듈-지도` 참조.
+실제 패키지 구조(`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `context/`(compact — 요약 전용, recovery.py 없음) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool). 파일별 책임은 `docs/architecture/00-overview.md#모듈-지도` 참조.
 
 ## 타겟 스택 & 검증
 

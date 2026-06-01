@@ -128,7 +128,7 @@ step(state) → ContextOverflowError 발생
 | `friday_agent/api/provider.py` | `LLMProvider`, `LLMError`, `ContextOverflowError`, 응답 블록 타입 |
 | `friday_agent/context/compact.py` | `compact_conversation()`, `create_compact_summary_message()` — `engine.compact()` 구현체 |
 | `friday_agent/api/prompts.py` | `assemble_system_prompt()` — 시스템 프롬프트 조립 + 범용 행동블록 주입 |
-| `friday_agent/memory/prompt.py` · `memory/store.py` | `build_memory_section()` — `engine.step()`의 턴별 메모리 섹션 조립; 기본 `FileMemoryStore`/`MemoryStore` 타입 |
+| `friday_agent/memory/store.py` | `build_memory_section()` — `engine.step()`의 턴별 메모리 섹션 조립; 기본 `FileMemoryStore`/`MemoryStore` 타입 |
 
 ---
 
