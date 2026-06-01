@@ -37,8 +37,7 @@ run_one_turn() once
 For structural details (reading order·key data structures·invariants·module map), see [docs/architecture/](docs/architecture/00-overview.md).
 
 For the detailed list of pitfalls, see `CLAUDE.md` (Key Implementation Pitfalls) and [docs/architecture/06-invariants.md](docs/architecture/06-invariants.md).
-For swapping the LLM backend, see [Swapping In a Different LLM Backend](#swapping-in-a-different-llm-backend) below,
-and for adding tools, see [Writing a Custom Tool (BYO Tool)](#writing-a-custom-tool-byo-tool).
+For adding tools·swapping the LLM·swapping the memory backend, see the [Extension Guide](#extension-guide-customizing-via-interface-injection).
 
 ---
 
@@ -182,22 +181,21 @@ The `TodoWrite` tool is always registered, and the todo usage guidance (`TODO_GU
 
 Persists typed facts (user/feedback/project/reference) long-term across session boundaries. The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) and the tools `memory_save`/`memory_read`/`memory_delete` are always registered, and the memory instructions + automatic index are reassembled every turn in `step()` and injected into the system prompt (no caching — on distributed resume the index freshly reflects the store state at resume time).
 
-A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**, so injecting your own store replaces the default store and tools wholesale:
-
-```python
-from friday_agent.memory.store import FileMemoryStore
-from friday_agent.core.engine import FridayAgent
-
-engine = FridayAgent(provider=provider, memory=FileMemoryStore("mem.md"))
-# To change only the backend, implement just MemoryStore's save/read/delete/load_index (inherit the default tools());
-# to change the tool surface too, override tools().
-```
-
-The default `FileMemoryStore` is a single-process/local convenience — for distributed/cloud persistence, inject a `MemoryStore` backed by external Storage (re-injected container-locally just like provider·tools). For details, see [08-memory](docs/architecture/08-memory.md).
+For how to replace the store with your own backend (external Storage·DB, etc.), see [Extension Guide — ③ Memory Backend](#extension-guide-customizing-via-interface-injection).
 
 ---
 
-## Writing a Custom Tool (BYO Tool)
+## Extension Guide: Customizing via Interface Injection
+
+`FridayAgent` has **3 injection seams** that can be swapped without touching the core loop (`run_one_turn`) — tools·LLM·memory. Each seam only requires implementing a defined interface. Common rules: **inject via the constructor** · if tool names collide, `FridayAgent.__init__` raises `ValueError` · `provider`/`memory` are not serialized into `LoopState`; they are re-injected container-locally.
+
+| seam | Interface to implement | Location | Injection |
+|---|---|---|---|
+| Tools | Subclass `Tool` | `friday_agent/tools/base.py` | `FridayAgent(tools=[...])` |
+| LLM | Subclass `LLMProvider` | `friday_agent/api/provider.py` | `FridayAgent(provider=...)` |
+| Memory | Subclass `MemoryStore` | `friday_agent/memory/store.py` | `FridayAgent(memory=...)` |
+
+### ① Tools (Tool)
 
 `ExampleTool` (`friday_agent/tools/builtin/example_tool.py`) is an example of the tool-authoring pattern.
 Just subclass `Tool` and implement the input schema and `call()`.
@@ -233,7 +231,7 @@ Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model ca
 
 > `TodoWrite` and the memory tools (`memory_save`/`memory_read`/`memory_delete`) are built-ins, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities-always-on)).
 
-### How the LLM Recognizes Tools
+#### How the LLM Recognizes Tools
 
 Everything the model relies on to judge "what this tool is and how to call it" reduces to the **3 keys** built by `Tool.get_tool_schema()`
 (`friday_agent/tools/base.py`). The schema that the `WeatherTool` above actually
@@ -264,7 +262,7 @@ So getting the LLM to recognize a tool "well" comes down to **writing these thre
 > To change the description dynamically based on input instead of a static docstring, override the `description()` method (defaults to the docstring).
 > The top-level `title` is removed, and `$defs` are expanded inline and then removed (nested models·enums are exposed as-is without `$ref` — e.g. `status` enum values appear directly in the schema). As shown above, **per-field `title` remains** — this is expected.
 
-### Execution Policy Methods Are Not Sent to the LLM
+#### Execution Policy Methods Are Not Sent to the LLM
 
 `is_concurrency_safe` is **not included** in
 the schema. It is not for the model's awareness — it is a runtime signal by which **the orchestrator controls execution**:
@@ -272,6 +270,80 @@ the schema. It is not for the model's awareness — it is a runtime signal by wh
 > Only tools whose `is_concurrency_safe()` is `True` run in a parallel batch (read-only tools are the typical example).
 > Tools that change external state (mutating) return `False` from `is_concurrency_safe()` and run sequentially.
 > For tool partitioning details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
+
+### ② LLM Backend (LLMProvider)
+
+Swapping the LLM only requires implementing **`LLMProvider`** (`friday_agent/api/provider.py`). Register a `config_type` (the config class) and have `complete()` **normalize** the vendor response into `AssistantResponse`, and a different backend works with no changes to the core loop.
+
+```python
+from dataclasses import dataclass
+from friday_agent.api.provider import (
+    LLMProvider, AssistantResponse, StopReason,
+    TextBlock, ToolUseBlock, TokenUsage, ContextOverflowError,
+)
+
+
+@dataclass
+class MyConfig:                       # minimal fields — max_tokens, temperature (LLMConfig protocol)
+    max_tokens: int = 16384
+    temperature: float | None = None
+
+
+class MyProvider(LLMProvider[MyConfig]):
+    config_type = MyConfig            # ← required: used to create·validate the default config
+
+    async def complete(self, messages, system_prompt, tools, config) -> AssistantResponse:
+        resp = await call_my_backend(messages, system_prompt, tools, config)   # vendor call
+        # vendor response → normalize to AssistantResponse
+        return AssistantResponse(
+            content=[TextBlock(text=resp.text)],     # or ToolUseBlock(id, name, input=<dict>)
+            stop_reason=StopReason.END_TURN,         # TOOL_USE / MAX_TOKENS / END_TURN
+            usage=TokenUsage(input_tokens=resp.in_, output_tokens=resp.out),
+        )
+        # on context overflow, raise ContextOverflowError → caller runs engine.compact(state), then retries
+```
+
+Implementation contract:
+
+- **Setting `config_type`** + **implementing `complete()`** is the whole core. Always normalize the response to `AssistantResponse(content, stop_reason, usage, id="", model="")`.
+- **content blocks**: `TextBlock(text)` · `ToolUseBlock(id, name, input=<already-parsed dict>)` · `ThinkingBlock` (some backends). `tool_use.input` must be a dict, not a string.
+- **`stop_reason`**: `END_TURN` / `TOOL_USE` / `MAX_TOKENS` / `CONTEXT_WINDOW_EXCEEDED`. Vendor values with no mapping go to `END_TURN`.
+- **Exception mapping**: map vendor exceptions into the 5-class hierarchy (`LLMError`·`RateLimitError`·`ContextOverflowError`·`AuthError`·`TransientError`). Context overflow **propagates** as `ContextOverflowError` (the loop does not catch it; the caller runs `compact`).
+- **Vendor rules are the adapter's responsibility**: omit the API field entirely for empty `tools`, do not send `temperature` when thinking is enabled, etc.
+
+For the vendor differences table·normalization details, see [03-llm-providers](docs/architecture/03-llm-providers.md).
+
+### ③ Memory Backend (MemoryStore)
+
+A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**. Injecting your own store replaces the default `FileMemoryStore` and its tools wholesale.
+
+```python
+from friday_agent.memory.store import MemoryStore, MemoryEntry, IndexEntry
+from friday_agent.core.engine import FridayAgent
+
+
+class RedisMemoryStore(MemoryStore):
+    async def save(self, entry: MemoryEntry) -> None: ...       # upsert by name (same name → update)
+    async def read(self, name: str) -> MemoryEntry | None: ...  # full entry (including body) or None
+    async def delete(self, name: str) -> None: ...              # ignore if missing
+    async def load_index(self) -> list[IndexEntry]:             # metadata only, no body (for index injection)
+        ...
+    # tools() as inherited by default gives memory_save/read/delete as-is.
+    # To change the tool surface (e.g. add search), override it:
+    #   def tools(self): return [MemorySave(self), MemoryRead(self), MySearchTool(self)]
+
+
+engine = FridayAgent(provider=provider, memory=RedisMemoryStore())   # replaces store+tools wholesale
+```
+
+Implementation contract:
+
+- **Implement 4 async methods**: `save` (upsert) · `read` · `delete` (ignore if missing) · `load_index` (metadata only, no body).
+- **Data model**: `MemoryEntry(name, description, type: MemoryType, body, updated_at)` · `IndexEntry` (no body) · `MemoryType` = `user`/`feedback`/`project`/`reference`.
+- **`tools()`** default = `memory_save`/`memory_read`/`memory_delete` wrappers. Overriding it replaces the tool surface wholesale.
+- The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) is a single-process/local convenience — for distributed/cloud persistence, inject a store backed by external Storage (re-injected container-locally just like `provider`, not serialized into `LoopState`).
+
+For details, see [08-memory](docs/architecture/08-memory.md).
 
 ---
 
@@ -306,16 +378,6 @@ async for item in engine.step(state):           # next turn … repeat until Ter
 ```
 
 Because the loop state is only ever updated at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `LoopState` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
-
-## Swapping In a Different LLM Backend
-
-Swapping the LLM only requires implementing the single interface **`LLMProvider`** (`friday_agent/api/provider.py`).
-Once `complete()` normalizes the LLM response into `AssistantResponse`, a different backend works without changing the core loop code.
-For abstraction boundary details, see [03-llm-providers](docs/architecture/03-llm-providers.md).
-
-> Besides the LLM (`LLMProvider`), there is also an injectable seam for **memory (`MemoryStore`)** — it swaps the persistent backend and its tools together (`FridayAgent(..., memory=...)`). For details, see [08-memory](docs/architecture/08-memory.md).
-
----
 
 ## Further Reading
 
