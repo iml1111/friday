@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "friday-agent-loop-poc"
+name = "friday-agent-loop"
 version = "0.1.0"
-description = "docs-only reimplementation of the Friday Agent Loop (fairness experiment)"
+description = "LLM-agnostic SDK for running agentic loops server-side, distilled from analyzing multiple agent-loop architectures"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.43.0",

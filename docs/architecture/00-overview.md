@@ -7,8 +7,8 @@ Detailed implementation is covered in the numbered sub-documents (01–06).
 
 ## Project Purpose
 
-A POC that reimplements Friday CLI's **agent loop (agentic loop)** in Python.  
-Rather than a mere clone, it turns the loop into a **domain-agnostic + LLM-agnostic** framework.  
+A **domain-agnostic + LLM-agnostic** SDK for **running agent loops in the cloud / on the server side**,  
+built by analyzing the operating structure of several agentic loops.  
 The goal is to serve as a foundation for building AI agents for a wide range of purposes beyond programming.
 
 Implementation: `friday_agent/` package (Python 3.11+, `anthropic` + `openai` SDK + `pydantic` + `anyio`).
@@ -17,10 +17,10 @@ Implementation: `friday_agent/` package (Python 3.11+, `anthropic` + `openai` SD
 
 ## Big Picture: Caller-Driven Turn Loop
 
-The core design principle is that **the library exposes only single-turn execution (`QueryEngine.step()`) and externalizes the while-true driver to the caller**. This lets the same engine be reused across diverse execution contexts such as a REPL and distributed orchestrators.
+The core design principle is that **the library exposes only single-turn execution (`QueryEngine.step()`) and externalizes the while-true driver to the caller**. This lets the same engine be reused across diverse server-side execution contexts such as distributed orchestrators and serverless (local example driver: `scripts/run_agent.py`).
 
 ```
-Caller (REPL / distributed orchestrator)
+Caller (distributed orchestrator / server side)
    │  LoopState(messages=[...])
    ▼
 async for item in engine.step(state):   ← AsyncGenerator
@@ -75,7 +75,7 @@ Emitting a serializable `Checkpoint(LoopState)` at each turn boundary supports *
 
 ## Implementation Scope Charter
 
-The spec intentionally describes only **"the essence of the agent loop algorithm"**. The excluded items below exist in the original Friday source but are outside this POC's scope. **Do not re-add them arbitrarily**.
+The spec intentionally describes only **"the essence of the agent loop algorithm"**. The excluded items below exist in the real implementations analyzed but are outside this SDK's scope. **Do not re-add them arbitrarily**.
 
 | Included (implemented at par level) | Excluded (intentional) |
 |---|---|
@@ -100,7 +100,7 @@ LLM_MODEL=<model-id> python scripts/verify_p2.py   # tool orchestration
 LLM_MODEL=<model-id> python scripts/verify_p3.py   # context overflow · compact recovery
 LLM_MODEL=<model-id> python scripts/verify_p4.py   # real backend end-to-end · adapter swap demonstration
 
-# Run the interactive agent
+# Run the local example driver
 python scripts/run_agent.py
 ```
 

@@ -1,7 +1,7 @@
-# friday-agent-loop-poc
+# friday-agent-loop
 
-A POC that reverse-engineers Friday CLI's **agent loop (agentic loop)** and reimplements it in Python.
-Rather than a mere clone, it turns the loop into a **domain-agnostic + LLM-agnostic** framework.
+Built by analyzing how several agent loops (agentic loops) work, this is a **domain-agnostic + LLM-agnostic** SDK
+for **running agent loops on the cloud/server side**.
 The goal is to serve as a foundation for building AI agents for a wide range of purposes beyond programming.
 
 The core is a turn loop that the caller drives by repeatedly calling `QueryEngine.step()`:

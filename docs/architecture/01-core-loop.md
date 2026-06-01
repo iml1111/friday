@@ -143,7 +143,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 ## ⑦ Design Rationale (Why)
 
 **Why single-turn step-only?**  
-By not placing a while-true driver inside the library, the same `QueryEngine.step()` can be reused across diverse execution contexts such as a REPL · distributed queues · serverless.
+By not placing a while-true driver inside the library, the same `QueryEngine.step()` can be reused across diverse server-side execution contexts such as distributed queues · serverless · server handlers.
 
 **Why stateless resume via `Checkpoint`?**  
 Emitting a serializable `LoopState` at the turn boundary means that even after a process restart or container move, resuming is just passing `Checkpoint.state` to `step()`. The types' `to_dict()`/`from_dict()` methods handle the JSON round-trip, and provider · config are excluded from serialization (container-local).

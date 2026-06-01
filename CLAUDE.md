@@ -2,11 +2,11 @@
 
 ## Project Purpose
 
-A POC that reimplements the **agent loop (agentic loop)** of Friday CLI in Python, following a reverse-engineered spec. Rather than a mere clone, the goal is to turn the loop into a **domain-agnostic + LLM-agnostic** framework that serves as a foundation for building AI agents for a wide range of purposes beyond programming.
+A **domain-agnostic + LLM-agnostic** SDK for **running agent loops on the cloud/server side**, built by analyzing how several agent loops (agentic loops) work. The goal is to serve as a foundation for building AI agents for a wide range of purposes beyond programming.
 
 ## Current Status
 
-**POC implementation complete** — Phase 1~3 (minimal loop · tool orchestration · context management) are all implemented in the `friday_agent/` package. Includes real backend adapters (Anthropic · OpenAI) + model-prefix routing, and stateless distributed resume (LoopState/Checkpoint). The architecture docs (`docs/architecture/`) are authoritative.
+**Implementation complete** — Phase 1~3 (minimal loop · tool orchestration · context management) are all implemented in the `friday_agent/` package. Includes real backend adapters (Anthropic · OpenAI) + model-prefix routing, and stateless distributed resume (LoopState/Checkpoint). The architecture docs (`docs/architecture/`) are authoritative.
 
 - Install: `pip install -e ".[dev]"`  ·  Tests (no API key required, fake provider): `python -m pytest`
 - Real API verification (incurs token cost): `LLM_MODEL=<model-id> python scripts/verify_p2.py` (P2~P4)
@@ -30,7 +30,7 @@ A POC that reimplements the **agent loop (agentic loop)** of Friday CLI in Pytho
 The core is a turn loop **driven by the caller** on top of `run_one_turn()` (single turn) (see `docs/architecture/01-core-loop.md`, `02-tool-orchestration.md`):
 
 ```
-Caller (REPL / distributed orchestrator)
+Caller (distributed orchestrator / server side)
         │  LoopState(messages=[...])  ← caller builds the first turn
         ▼
 engine.step(state)       ┌─ run_one_turn once (async generator) ──────────┐
@@ -47,7 +47,7 @@ engine.step(state)       ┌─ run_one_turn once (async generator) ────
 Caller consumes via `async for`: if the last sentinel is a Checkpoint, pass its state and call step() again; if Terminal, stop.
 ```
 
-> Implementation note: the library exposes only single-turn execution, `QueryEngine.step()` — the batch driver (`query()`)·run-to-completion entry point (`submit_message`)·`max_turns` were removed (the while-true driver of reverse-engineered spec `02` is externalized to the caller). It emits a serializable `Checkpoint(LoopState)` at the turn boundary to support **stateless distributed resume** (`QueryEngine.step()` + the types' `to_dict()`/`from_dict()`).
+> Implementation note: the library exposes only single-turn execution, `QueryEngine.step()` — the batch driver (`query()`)·run-to-completion entry point (`submit_message`)·`max_turns` were removed (the while-true driver of agent loop spec `02` is externalized to the caller). It emits a serializable `Checkpoint(LoopState)` at the turn boundary to support **stateless distributed resume** (`QueryEngine.step()` + the types' `to_dict()`/`from_dict()`).
 
 Core data structures (`docs/architecture/01-core-loop.md`·`05-messages.md`):
 - **`Message` + `ContentBlock`** — there is no separate *Message class union. Just a single `Message` dataclass (`type` tag: `user`/`assistant`/`system`) with flag fields (`is_compact_summary`/`is_meta`/`is_api_error_message`). Blocks are likewise represented by a single flat `ContentBlock` dataclass (`type`: `text`/`tool_use`/`tool_result`/`thinking`).
@@ -56,7 +56,7 @@ Core data structures (`docs/architecture/01-core-loop.md`·`05-messages.md`):
 
 ## Implementation Scope Charter (must follow)
 
-The architecture docs intentionally describe only **"the essence of the agent loop algorithm"** — a higher level of abstraction than the actual Friday source. The excluded items below exist in the original source but are out of scope for this POC. **Do not re-add these on your own** (details: `docs/architecture/00-overview.md`):
+The architecture docs intentionally describe only **"the essence of the agent loop algorithm"** — a higher level of abstraction than the actual agent loop implementations analyzed. The excluded items below exist in those implementations but are out of scope for this SDK. **Do not re-add these on your own** (details: `docs/architecture/00-overview.md`):
 
 | Included (implemented at par level) | Excluded (intentional) |
 |---|---|

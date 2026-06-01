@@ -1,6 +1,8 @@
-"""run_agent.py — Interactive REPL for the agent loop.
+"""run_agent.py — Local example driver for the agent loop SDK.
 
-Run the agent loop interactively without writing any import code.
+A minimal local harness for trying the SDK from a terminal without writing any
+import code. The SDK itself targets server-side / distributed execution; this
+script is just a convenience example for local testing.
 Each input drives step() to completion over the accumulated history to maintain multi-turn context.
 
 Usage:
@@ -9,7 +11,7 @@ Usage:
 Model is set by the _MODEL constant near the top of this file.
 
 Commands:
-    exit / quit / Ctrl-D   quit the REPL
+    exit / quit / Ctrl-D   quit
     (blank lines are ignored)
 
 ExampleTool is wired in by default so you can observe the
@@ -69,7 +71,7 @@ async def main() -> int:
         config=provider.config_type(max_tokens=_MAX_TOKENS),
     )
 
-    print(f"friday-agent REPL — model={_MODEL}  (tools: ExampleTool)")
+    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool)")
     print("Enter a prompt. To quit: exit / quit / Ctrl-D\n")
 
     history: list[Message] = []
@@ -111,7 +113,7 @@ async def main() -> int:
                 if turns >= _MAX_TURNS:
                     break
         except Exception as exc:
-            # Catch API errors so the REPL stays alive; roll back the failed turn.
+            # Catch API errors so the session stays alive; roll back the failed turn.
             print(f"  [error] {type(exc).__name__}: {exc}")
             history.pop()
             continue
