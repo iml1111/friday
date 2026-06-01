@@ -14,7 +14,7 @@
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | 대화 히스토리 단위 |
 | `ContentBlock` (내부 flat) | `messages/types.py` | ✅ | Message 내부 블록 |
-| `LoopState` | `core/state.py` | ✅ | 루프 상태(messages + turn_count) + 턴 경계 "계속" 재개 sentinel — 이송 단위는 `json.dumps(loopstate.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | 루프 상태(messages + turn_count + todos) + 턴 경계 "계속" 재개 sentinel — 이송 단위는 `json.dumps(loopstate.to_dict())` |
 | 그 외 전부 | — | ❌ | 런타임 전용 (provider·config·응답·도구 결과 등) |
 
 ---
@@ -60,6 +60,7 @@
 |---|---|---|
 | `messages` | `list[Message]` | 전체 히스토리 |
 | `turn_count` | `int` (기본 1) | 턴 카운터 |
+| `todos` | `list[dict]` (기본 `[]`) | 추적 중인 todo 목록; 각 항목 `{"content", "status"}`. 매 턴 API view에 리마인더로 주입(비영속) |
 
 provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한다. `run_one_turn()`이 턴 완료 후 루프가 계속될 때 이 `LoopState`를 그대로 yield한다 (`Terminal`과 대비).
 
@@ -137,6 +138,7 @@ provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한�
 |---|---|---|
 | `data` | `Any` | 실행 결과 (문자열/구조화 데이터) |
 | `is_error` | `bool` | 오류 여부 (기본 `False`) |
+| `state_effect` | `dict \| None` | 선언적 루프-상태 변이(예 `{"todos": [...]}`); 루프가 적용, 기본 `None` |
 
 #### `Batch` (오케스트레이터 내부) — 파티셔닝 산출물
 

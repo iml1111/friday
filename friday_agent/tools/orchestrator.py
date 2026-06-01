@@ -107,11 +107,11 @@ def partition_tool_calls(
 # Single-tool execution helper
 # ---------------------------------------------------------------------------
 
-async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> Message:
-    """Execute one tool call and return a tool_result message.
+async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> tuple[Message, dict | None]:
+    """Execute one tool call -> (tool_result message, state_effect | None).
 
-    Unknown tool or any exception produces an error tool_result rather than
-    crashing the batch.
+    Unknown tool or any exception produces an error tool_result (and no effect)
+    rather than crashing the batch.
     """
     tool = _find_tool(tools, block.name or "")
 
@@ -120,7 +120,7 @@ async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> Message:
             tool_use_id=block.id or "",
             result_text=f"Error: Unknown tool: {block.name!r}",
             is_error=True,
-        )
+        ), None
 
     try:
         result = await tool.call(block.input or {})
@@ -128,13 +128,13 @@ async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> Message:
             tool_use_id=block.id or "",
             result_text=str(result.data),
             is_error=result.is_error,
-        )
+        ), result.state_effect
     except Exception as exc:
         return create_tool_result_message(
             tool_use_id=block.id or "",
             result_text=f"Error: {exc}",
             is_error=True,
-        )
+        ), None
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +146,7 @@ async def run_tools(
     tools: list[Tool],
     *,
     max_concurrency: int = 10,
+    effects_sink: list[dict] | None = None,
 ) -> AsyncGenerator[Message, None]:
     """Execute tool calls partitioned into batches and yield tool_result messages.
 
@@ -154,10 +155,14 @@ async def run_tools(
     Sequential batches run one block at a time.
     Unknown tools and exceptions produce error tool_results instead of crashing.
 
+    If effects_sink is provided, each tool's non-None ToolResult.state_effect is
+    appended to it in block order (the message stream is unchanged).
+
     Args:
         blocks: tool_use ContentBlocks to execute.
         tools: available tool instances.
         max_concurrency: maximum simultaneous tool calls (default 10).
+        effects_sink: optional list that collects state_effects in block order.
 
     Yields:
         tool_result Messages in the same order as the input blocks.
@@ -169,14 +174,19 @@ async def run_tools(
     for batch in batches:
         if batch.is_concurrency_safe and len(batch.blocks) > 1:
             # Parallel: Semaphore caps concurrency; gather preserves block order.
-            async def _bounded(b: ContentBlock) -> Message:
+            async def _bounded(b: ContentBlock) -> tuple[Message, dict | None]:
                 async with semaphore:
                     return await _run_single_tool(b, tools)
 
             results = await asyncio.gather(*[_bounded(b) for b in batch.blocks])
-            for msg in results:
+            for msg, effect in results:
+                if effects_sink is not None and effect is not None:
+                    effects_sink.append(effect)
                 yield msg
         else:
             # Sequential: process each block one at a time.
             for block in batch.blocks:
-                yield await _run_single_tool(block, tools)
+                msg, effect = await _run_single_tool(block, tools)
+                if effects_sink is not None and effect is not None:
+                    effects_sink.append(effect)
+                yield msg

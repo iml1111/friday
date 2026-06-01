@@ -26,3 +26,9 @@ def test_tool_schema_shape():
     schema = _T().get_tool_schema()
     assert set(schema) >= {"name", "description", "input_schema"}
     assert schema["name"] == "T"
+
+
+def test_tool_result_state_effect_default_and_set():
+    assert ToolResult(data="ok").state_effect is None
+    r = ToolResult(data="ok", state_effect={"todos": [{"content": "A", "status": "pending"}]})
+    assert r.state_effect == {"todos": [{"content": "A", "status": "pending"}]}

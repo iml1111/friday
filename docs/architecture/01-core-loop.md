@@ -32,17 +32,18 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 ### 실행 순서
 
 ```
-1. normalize_for_api(state.messages)
-      └─ provider.complete()       ← LLM 호출
+1. api_input_messages = list(state.messages)
+      └─ state.todos 있으면 with_todo_reminder()로 <system-reminder> 주입 (API view 전용·비영속)
+      └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM 호출
 
 2. 응답 → _to_assistant_message()       ← 내부 Message로 변환 후 yield
 
 3. tool_use 블록이 있으면
-      └─ run_tools()                     ← 도구 병렬 실행
+      └─ run_tools(effects_sink=effects) ← 도구 병렬 실행 + state_effect 수집
             └─ tool_result message yield (각 결과)
 
-4. 턴 끝: sentinel 1개 yield
-      LoopState              ─ 루프 계속
+4. 턴 끝: sentinel 1개 yield (next_todos = apply_state_effects(state.todos, effects))
+      LoopState              ─ 루프 계속 (깨끗한 state.messages + next_todos)
       Terminal               ─ 루프 종료
 ```
 
@@ -112,7 +113,7 @@ step(state) → ContextOverflowError 발생
 
 | 타입 | 정의 위치 | 역할 |
 |---|---|---|
-| `LoopState(messages, turn_count=1)` | `core/state.py:39` | 직렬화 가능한 루프 이송 단위 + 턴 경계 "계속" 재개 sentinel |
+| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:39` | 직렬화 가능한 루프 이송 단위 + 턴 경계 "계속" 재개 sentinel |
 | `Terminal(reason, error=None)` | `core/state.py:19` | 루프 종료 sentinel |
 
 ---
@@ -135,7 +136,8 @@ step(state) → ContextOverflowError 발생
 - **범용 행동블록 자동 주입.** `run_one_turn()`은 호출자 `system_prompt` 뒤에 `GENERAL_AGENT_GUIDANCE`(프롬프트 인젝션 플래깅·`<system-reminder>` 의미·hooks·행동의 가역성·간결성 등)를 **항상** 덧붙여 전송한다 (`loop.py:166` › `assemble_system_prompt()`). opt-out 플래그는 없다. 컴팩션 요약 호출(`engine.compact()`)은 이 경로를 거치지 않으므로 범용블록이 요약에 섞이지 않는다.
 - **`tool_use↔tool_result` 쌍 보존.** `LLMError` 경로에서 백필(`yield_missing_tool_result_blocks`)이 작동해 LLM API 거부를 방지한다. 이 불변식이 깨지면 다음 API 호출이 즉시 실패한다. 상세는 [06-invariants](06-invariants.md) 참조.
 - **루프 상태는 깨끗한 턴 경계에서만 업데이트.** `LoopState`는 도구 결과가 모두 수집된 뒤에만 yield되므로, 직렬화·재개 시 중간 상태가 누락되지 않는다.
-- **serde는 provider·config를 직렬화하지 않음.** `LoopState.to_dict()` / `LoopState.from_dict()`는 messages + turn_count만 왕복한다. provider·config는 컨테이너 로컬 객체로 간주해 재개 시 다시 주입한다.
+- **serde는 provider·config를 직렬화하지 않음.** `LoopState.to_dict()` / `LoopState.from_dict()`는 messages + turn_count + todos만 왕복한다. provider·config는 컨테이너 로컬 객체로 간주해 재개 시 다시 주입한다.
+- **턴별 todo 리마인더는 비영속.** `state.todos`가 비어있지 않으면 `run_one_turn()`이 매 턴 `<system-reminder>`를 **API view 전용 사본(`api_input_messages`)**의 끝 user 턴에 합류시켜 전송한다. 다음 `LoopState`는 리마인더가 없는 `state_messages`에서 조립되므로 리마인더는 상태에 쌓이지 않고, 분산 재개 시 `todos`에서 결정론적으로 재생성된다. `engine.compact()`도 `todos`를 carry-forward한다(요약은 prose, todos는 구조화 상태).
 
 ---
 

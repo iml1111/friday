@@ -56,11 +56,11 @@
 `orchestrator.py:145` / `core/loop.py:40,216` — `run_one_turn()`이 직접 호출하는 유일한 실행 경로다.
 
 ```python
-# core/loop.py:40
+# core/loop.py
 from friday_agent.tools.orchestrator import run_tools
 
-# core/loop.py:216
-async for result_msg in run_tools(tool_use_blocks, tools, max_concurrency=max_concurrency):
+# core/loop.py — effects_sink로 각 도구의 state_effect 수집 (메시지 yield 순서는 불변)
+async for result_msg in run_tools(tool_use_blocks, tools, max_concurrency=max_concurrency, effects_sink=effects):
 ```
 
 동작:
@@ -68,6 +68,7 @@ async for result_msg in run_tools(tool_use_blocks, tools, max_concurrency=max_co
 2. 병렬 배치(`is_concurrency_safe=True` AND `len > 1`): `asyncio.Semaphore(max_concurrency)`로 동시성을 제한하고 `asyncio.gather`로 실행. 결과는 블록 순서 그대로 yield.
 3. 그 외(순차 배치 또는 블록이 1개): 블록을 하나씩 순서대로 실행.
 4. 알 수 없는 도구·예외 → 에러 `tool_result` 생성, 배치 계속 진행.
+5. `effects_sink`(선택 인자)가 주어지면, 각 도구의 `ToolResult.state_effect`(None 아님)를 **블록 순서대로** sink에 누적한다. 메시지 스트림은 불변이며, `_run_single_tool`은 `(Message, state_effect)` 튜플을 반환한다. 루프가 이 sink를 모아 다음 `LoopState.todos`를 계산한다(상태 단독 writer = 루프).
 
 ---
 
@@ -148,6 +149,7 @@ class WeatherTool(Tool):
 ToolResult(
     data,                   # 실행 결과 (문자열 또는 구조화 데이터)
     is_error=False,
+    state_effect=None,      # 선언적 상태 변이(예 {"todos": [...]}); 루프가 단독 적용
 )
 ```
 
