@@ -9,7 +9,7 @@ A **domain-agnostic + LLM-agnostic** SDK for **running agent loops on the cloud/
 **Implementation complete** — Phase 1~3 (minimal loop · tool orchestration · context management) are all implemented in the `friday_agent/` package. Includes real backend adapters (Anthropic · OpenAI) + model-prefix routing, and stateless distributed resume (LoopState). The architecture docs (`docs/architecture/`) are authoritative.
 
 - Install: `pip install -e ".[dev]"`  ·  Tests (no API key required, fake provider): `python -m pytest`
-- Real API verification (incurs token cost): `LLM_MODEL=<model-id> python scripts/verify_p2.py` (P2~P4)
+- Real API verification (incurs token cost): `LLM_MODEL=<model-id> python scripts/verify/verify_p2.py` (P2~P4)
 - For code entry points · module map · reading order, see `docs/architecture/00-overview.md` (especially `#module-map`).
 
 ## Architecture Docs = Single Source of Truth

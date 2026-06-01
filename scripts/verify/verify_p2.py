@@ -4,7 +4,7 @@ Checks that a single ExampleTool call completes the full cycle:
 tool invoked → tool_result fed back → final text response → Terminal(reason="completed").
 
 Usage:
-    LLM_MODEL=<model-id> python scripts/verify_p2.py
+    LLM_MODEL=<model-id> python scripts/verify/verify_p2.py
 
 Cost guardrail: max_tokens=512; caller-side turn cap=5.
 """
@@ -13,7 +13,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ → import _env
 from _env import create_config, create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal

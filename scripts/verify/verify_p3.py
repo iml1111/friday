@@ -9,7 +9,7 @@ triggering a real context-overflow 413 (which would require ~200K input tokens
 and would be prohibitively costly).
 
 Usage:
-    LLM_MODEL=<model-id> python scripts/verify_p3.py
+    LLM_MODEL=<model-id> python scripts/verify/verify_p3.py
 
 Cost guardrail: max_tokens=512; caller-side turn cap=6.
 """
@@ -18,11 +18,13 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 _MODEL = os.environ.get("LLM_MODEL", "")
 if not _MODEL:
     sys.exit("Set the LLM_MODEL environment variable to a real model ID.")
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ → import _env
 from _env import create_config, create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal

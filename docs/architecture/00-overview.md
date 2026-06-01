@@ -100,9 +100,9 @@ The spec intentionally describes only **"the essence of the agent loop algorithm
 python -m pytest
 
 # Real API verification (calls real backends — incurs token cost)
-LLM_MODEL=<model-id> python scripts/verify_p2.py   # tool orchestration
-LLM_MODEL=<model-id> python scripts/verify_p3.py   # context overflow · compact recovery
-LLM_MODEL=<model-id> python scripts/verify_p4.py   # real backend end-to-end · adapter swap demonstration
+LLM_MODEL=<model-id> python scripts/verify/verify_p2.py   # tool orchestration
+LLM_MODEL=<model-id> python scripts/verify/verify_p3.py   # context overflow · compact recovery
+LLM_MODEL=<model-id> python scripts/verify/verify_p4.py   # real backend end-to-end · adapter swap demonstration
 
 # Run the local example driver
 python scripts/run_agent.py

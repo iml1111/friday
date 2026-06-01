@@ -147,13 +147,13 @@ If the last item received is a `Terminal`, stop the loop. `terminal.reason` is o
 ```bash
 # Inject the model ID via the LLM_MODEL environment variable (provider auto-routed by prefix)
 # P2 — single tool cycle: tool_use → tool_result → final response
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p2.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p2.py
 
 # P3 — caller-driven compact recovery verification (explicitly calls engine.compact() to check real-backend summarization+continuity)
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p3.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p3.py
 
 # P4 — real backend end-to-end + adapter swap structure demonstration
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p4.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p4.py
 ```
 
 Each script prints a checklist and returns an exit code (0/1) along with PASS/FAIL.
