@@ -9,7 +9,7 @@ Verifies the step() API and the tests/_drive.py driver:
 """
 import pytest
 
-from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
+from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE
 from friday_agent.context.compact import SUMMARIZER_SYSTEM_PROMPT
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
 from friday_agent.core.engine import FridayAgent
@@ -186,6 +186,7 @@ async def test_compact_does_not_inject_general_guidance():
     engine = FridayAgent(provider=fake, tools=[], system_prompt="You are a domain assistant.")
     await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
     assert GENERAL_AGENT_GUIDANCE not in fake.received_system_prompts[0]
+    assert TODO_GUIDANCE not in fake.received_system_prompts[0]
     assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
 
 

@@ -1,6 +1,7 @@
 """Tests for friday_agent/api/prompts.py — system prompt assembly (assemble_system_prompt)."""
 from friday_agent.api.prompts import (
     GENERAL_AGENT_GUIDANCE,
+    TODO_GUIDANCE,
     assemble_system_prompt,
 )
 
@@ -23,8 +24,18 @@ def test_assemble_always_injects_general_guidance():
     assert GENERAL_AGENT_GUIDANCE in s
 
 
-def test_assemble_empty_base_returns_guidance_only():
-    assert str(assemble_system_prompt("")) == GENERAL_AGENT_GUIDANCE
+def test_assemble_empty_base_returns_general_then_todo_guidance():
+    s = str(assemble_system_prompt(""))
+    assert s == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}"
+
+
+def test_assemble_always_injects_todo_guidance():
+    assert TODO_GUIDANCE in str(assemble_system_prompt("You are a research assistant."))
+    assert TODO_GUIDANCE in str(assemble_system_prompt(""))
+    # Base prompt still leads; general guidance still present.
+    s = str(assemble_system_prompt("BASE"))
+    assert s.startswith("BASE")
+    assert GENERAL_AGENT_GUIDANCE in s
 
 
 def test_general_agent_guidance_is_domain_general_and_brand_free():

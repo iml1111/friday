@@ -188,6 +188,8 @@ ToolResult(
 
 **`is_concurrency_safe` 보수적 기본값** — 새 도구를 작성하면 기본값이 `False`이므로 의도치 않게 병렬 배치가 형성되지 않는다. 병렬 실행을 원하면 `is_concurrency_safe()`를 명시적으로 `True`로 오버라이드해야 한다 — 파티셔닝은 이 술어 하나만 참조한다.
 
+**빌트인 도구 자동 등록** — `FridayAgent`는 `builtin_tools()`(`friday_agent/tools/builtin/__init__.py`)가 반환하는 도구(현재 `TodoWrite`)를 호출자 도구 뒤에 항상 병합한다. 이름이 겹치는 도구를 호출자가 넘기면 `__init__`에서 `ValueError`로 거부한다(중복 도구 이름은 LLM API가 거부하므로, 조용한 dedupe 대신 명시적 거부로 정합성을 지킨다). 주입은 엔진 경계에서만 일어나므로 오케스트레이터·루프는 도구 이름을 모른 채 유지된다.
+
 ---
 
 ## ⑦ 설계 근거 (Why)

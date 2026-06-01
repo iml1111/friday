@@ -17,6 +17,7 @@ from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import Message
 from friday_agent.tools.base import Tool
+from friday_agent.tools.builtin import builtin_tools
 
 
 class FridayAgent:
@@ -60,8 +61,17 @@ class FridayAgent:
                 f"{type(config).__name__}. Match the config type to the model vendor."
             )
 
+        caller_tools = tools if tools is not None else []
+        builtins = builtin_tools()
+        builtin_names = {t.name for t in builtins}
+        clash = sorted({t.name for t in caller_tools if t.name in builtin_names})
+        if clash:
+            raise ValueError(
+                f"FridayAgent: {clash} are built-in tools that are always registered; "
+                f"remove them from the tools list."
+            )
         self._provider = provider
-        self._tools = tools if tools is not None else []
+        self._tools = [*caller_tools, *builtins]
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency

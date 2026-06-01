@@ -157,7 +157,7 @@ async def test_todowrite_updates_next_state_and_reminder_appears_next_turn():
     )
     r2 = AssistantResponse(content=[TextBlock(text="done")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
     fake = FakeLLMProvider(responses=[r1, r2])
-    engine = FridayAgent(provider=fake, tools=[TodoWrite()])
+    engine = FridayAgent(provider=fake, tools=[])
 
     # Turn 1: todos empty at turn start -> NO reminder; effect lands in next state.
     _, outcome1 = await collect_turn(engine, LoopState(messages=[create_user_message("do multi-step work")]))
@@ -205,7 +205,7 @@ async def test_todos_survive_serialize_roundtrip_and_reminder_regenerates():
     )
     r2 = AssistantResponse(content=[TextBlock(text="done")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
     fake = FakeLLMProvider(responses=[r1, r2])
-    engine = FridayAgent(provider=fake, tools=[TodoWrite()])
+    engine = FridayAgent(provider=fake, tools=[])
 
     # Worker A: run the TodoWrite turn, then serialize the resulting state.
     _, outcome1 = await collect_turn(engine, LoopState(messages=[create_user_message("go")]))

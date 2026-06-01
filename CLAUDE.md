@@ -90,6 +90,7 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 
 - **Python 3.11+**, `anthropic` + `openai` SDK + `pydantic` + `anyio`.
 - API 키: **외부 주입 전용**(필수). 라이브러리는 환경변수를 읽지 않는다 — provider 생성 시 어댑터(`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`)에 직접 넘긴다. 키 해석(env→인자)과 모델 prefix(claude-/gpt-)→어댑터 라우팅은 모두 경계 계층 `scripts/_env.py`(`resolve_api_key(model)`·`create_provider(model, api_key=...)`)가 담당한다 — 라이브러리는 라우팅 팩토리를 제공하지 않는다. **`FridayAgent`은 provider를 직접 받는다(필수)** — model/api_key 인자는 없다. 공개 API 면: `engine.step(state)` (단일 턴 비동기 제너레이터 — Message들을 순서대로 yield하고 마지막에 `LoopState | Terminal` sentinel 1개를 yield) + `engine.compact(state)` (호출자 주도 compact). 호출 config는 벤더 config를 직접 입력한다(예: `AnthropicConfig(max_tokens=...)` 또는 `provider.config_type(max_tokens=...)`; 미지정 시 `provider.config_type()` 기본값). `context_window`·`max_output_tokens`는 어댑터 생성자, `max_concurrency`는 `FridayAgent(...)`.
+- **빌트인 todo 항상-주입**: `TodoWrite` 도구와 todo 가이던스(`TODO_GUIDANCE`)는 항상 빌트인으로 자동 등록·주입된다(호출자 주입 불필요, opt-out 없음). 호출자가 같은 이름의 도구를 넘기면 `FridayAgent.__init__`이 `ValueError`로 거부한다.
 - Phase 검증: 단일 도구(P1) → 병렬 도구 배치(P2) → `ContextOverflowError` → `engine.compact(state)` 호출자 복구(P3).
 
 ## 구현 시 핵심 함정
