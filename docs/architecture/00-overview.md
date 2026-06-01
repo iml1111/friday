@@ -32,13 +32,13 @@ async for item in engine.step(state):   ← AsyncGenerator
    │
    ├─ yield: AssistantMessage          ← 응답 도착 시 즉시
    ├─ yield: tool_result Message…      ← 각 도구 결과
-   └─ yield: Checkpoint | Terminal     ← 마지막 sentinel 1개
+   └─ yield: LoopState | Terminal      ← 마지막 sentinel 1개
         ContextOverflowError 발생 시 → 호출자가 engine.compact(state) 후 재시도
 
-item이 Checkpoint면 state = item.state 갱신 후 step() 재호출, Terminal이면 종료.
+item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 ```
 
-턴 경계에서 직렬화 가능한 `Checkpoint(LoopState)`를 방출해 **stateless 분산 재개**를 지원한다.
+턴 경계에서 직렬화 가능한 `LoopState`를 그대로 방출해 **stateless 분산 재개**를 지원한다.
 
 ---
 
@@ -110,5 +110,5 @@ python scripts/run_agent.py
 
 라이브러리는 단일 턴 `FridayAgent.step()`만 노출하고 while-true 드라이버를 호출자에게 외부화했다. 이 결정의 핵심 이점은 두 가지다.
 
-1. **stateless 분산 재개** — 턴 경계마다 직렬화 가능한 `Checkpoint(LoopState)`를 방출하므로, 프로세스 재시작이나 분산 큐 환경에서도 상태를 복원할 수 있다. JSON serde는 타입(`Checkpoint`/`LoopState`/`Message`)의 `to_dict()`/`from_dict()` 메서드가 담당한다.
+1. **stateless 분산 재개** — 턴 경계마다 직렬화 가능한 `LoopState`를 그대로 방출하므로, 프로세스 재시작이나 분산 큐 환경에서도 상태를 복원할 수 있다. JSON serde는 타입(`LoopState`/`Message`)의 `to_dict()`/`from_dict()` 메서드가 담당한다.
 2. **컨텍스트 관리 책임 분리** — `ContextOverflowError`를 호출자에게 전파함으로써 라이브러리 내부를 단순하게 유지하고, compact 전략(타이밍·요약 방식)을 호출자가 직접 제어하게 한다 (`engine.compact(state)`).

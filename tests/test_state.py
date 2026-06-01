@@ -1,4 +1,4 @@
-from friday_agent.core.state import Terminal, LoopState, Checkpoint
+from friday_agent.core.state import Terminal, LoopState
 from friday_agent.messages.types import create_user_message
 
 
@@ -19,9 +19,3 @@ def test_loopstate_explicit_fields():
     s = LoopState(messages=[], turn_count=5)
     assert s.turn_count == 5
     assert len(s.messages) == 0
-
-
-def test_checkpoint_wraps_state():
-    s = LoopState(messages=[])
-    cp = Checkpoint(state=s)
-    assert cp.state is s

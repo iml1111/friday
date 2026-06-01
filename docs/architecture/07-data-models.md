@@ -14,8 +14,7 @@
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | 대화 히스토리 단위 |
 | `ContentBlock` (내부 flat) | `messages/types.py` | ✅ | Message 내부 블록 |
-| `LoopState` | `core/state.py` | ✅ | 루프 상태(messages + turn_count) |
-| `Checkpoint` | `core/state.py` | ✅ | 턴 경계 재개 sentinel — 이송 단위는 `json.dumps(checkpoint.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | 루프 상태(messages + turn_count) + 턴 경계 "계속" 재개 sentinel — 이송 단위는 `json.dumps(loopstate.to_dict())` |
 | 그 외 전부 | — | ❌ | 런타임 전용 (provider·config·응답·도구 결과 등) |
 
 ---
@@ -55,22 +54,14 @@
 
 ### 2.2 루프 상태 / 제어 — `core/state.py` → 상세 [01-core-loop](01-core-loop.md)
 
-#### `LoopState` — 직렬화 가능한 루프 상태
+#### `LoopState` — 직렬화 가능한 루프 상태이자 "계속" sentinel
 
 | 필드 | 타입 | 의미 |
 |---|---|---|
 | `messages` | `list[Message]` | 전체 히스토리 |
 | `turn_count` | `int` (기본 1) | 턴 카운터 |
 
-provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한다.
-
-#### `Checkpoint` — "계속" sentinel
-
-| 필드 | 타입 | 의미 |
-|---|---|---|
-| `state` | `LoopState` | 다음 턴 상태 |
-
-`run_one_turn()`이 턴 완료 후 루프가 계속될 때 yield한다 (Terminal과 대비).
+provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한다. `run_one_turn()`이 턴 완료 후 루프가 계속될 때 이 `LoopState`를 그대로 yield한다 (`Terminal`과 대비).
 
 #### `Terminal` — "종료" sentinel
 
@@ -182,8 +173,7 @@ provider.complete()
 
 [턴 경계 이송]
    LoopState(messages=[Message], turn_count)
-        └─ Checkpoint(state)
-              └─ json.dumps(checkpoint.to_dict())   ← 분산 재개 단위
+        └─ json.dumps(loopstate.to_dict())   ← 분산 재개 단위
 ```
 
 ---

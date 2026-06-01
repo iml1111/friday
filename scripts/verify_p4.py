@@ -30,7 +30,7 @@ if not _MODEL:
 from _env import create_provider, resolve_api_key
 from friday_agent.api.provider import LLMProvider
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
 from friday_agent.tools.builtin.example_tool import ExampleTool
@@ -112,7 +112,7 @@ async def run_p4a() -> tuple[bool, str]:
     while True:
         outcome = None
         async for item in engine.step(state):
-            if isinstance(item, (Checkpoint, Terminal)):
+            if isinstance(item, (LoopState, Terminal)):
                 outcome = item
             else:
                 msgs.append(item)
@@ -120,7 +120,7 @@ async def run_p4a() -> tuple[bool, str]:
         if isinstance(outcome, Terminal):
             terminal = outcome
             break
-        state = outcome.state
+        state = outcome
         if turns >= _CAP:
             break
 
@@ -168,12 +168,12 @@ async def run_p4b() -> tuple[bool, str]:
     while turns < _CAP:
         outcome = None
         async for item in engine.step(state):
-            if isinstance(item, (Checkpoint, Terminal)):
+            if isinstance(item, (LoopState, Terminal)):
                 outcome = item
         turns += 1
         if isinstance(outcome, Terminal):
             break
-        state = outcome.state
+        state = outcome
         accumulated = state
 
     compacted = await engine.compact(accumulated)
@@ -187,9 +187,9 @@ async def run_p4b() -> tuple[bool, str]:
     # Continuation after resume.
     cont_outcome = None
     async for item in engine.step(restored):
-        if isinstance(item, (Checkpoint, Terminal)):
+        if isinstance(item, (LoopState, Terminal)):
             cont_outcome = item
-    continued_ok = isinstance(cont_outcome, (Checkpoint, Terminal))
+    continued_ok = isinstance(cont_outcome, (LoopState, Terminal))
 
     if not (summary_ok and serde_ok and continued_ok):
         return False, f"sub-B: summary_ok={summary_ok}, serde_ok={serde_ok}, continued_ok={continued_ok}"

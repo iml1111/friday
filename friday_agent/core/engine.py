@@ -3,8 +3,8 @@
 Holds the provider, tools, and call configuration, and exposes step(state): an
 async generator that yields each Message produced during the turn (assistant
 response, then each tool_result) and finally yields exactly one sentinel —
-Checkpoint (loop may continue) or Terminal (loop has ended). The caller drives
-the turn loop by calling step() until the sentinel is a Terminal.
+the next LoopState (loop may continue) or Terminal (loop has ended). The caller
+drives the turn loop by calling step() until the sentinel is a Terminal.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import AsyncGenerator
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
 from friday_agent.core.loop import run_one_turn
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import Message
 from friday_agent.tools.base import Tool
@@ -66,17 +66,17 @@ class FridayAgent:
         self._config = config
         self._max_concurrency = max_concurrency
 
-    async def step(self, state: LoopState) -> AsyncGenerator[Message | Checkpoint | Terminal, None]:
+    async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
 
         Yields every Message emitted during the turn (assistant response, then each
-        tool_result) immediately, then yields exactly one final sentinel: a Checkpoint
-        (loop may continue — carries the next LoopState) or a Terminal (loop ended).
+        tool_result) immediately, then yields exactly one final sentinel: the next
+        LoopState (loop may continue) or a Terminal (loop ended).
         Thin passthrough over run_one_turn bound to this engine's provider/tools/config.
 
         The state may have been serialized and restored across containers, so this is
         the sole entry point for both starting and resuming. Distributed resume is
-        unchanged: serialize the final Checkpoint's state.
+        unchanged: serialize the final LoopState directly.
 
         Raises:
             ContextOverflowError: propagated from run_one_turn during iteration when the

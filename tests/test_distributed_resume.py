@@ -7,7 +7,7 @@ from friday_agent.api.provider import (
     AssistantResponse, ContextOverflowError, StopReason, TextBlock, ToolUseBlock, TokenUsage,
 )
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
 from tests._drive import drive, collect_turn
@@ -56,12 +56,12 @@ async def test_distributed_resume_matches_full_run():
     msgs, outcome = await collect_turn(dist_engine, LoopState(messages=[create_user_message("run example")]))
     collected.extend(msgs)
     hops = 0
-    while isinstance(outcome, Checkpoint):
-        pre_state_sig = _sig(outcome.state.messages)
+    while isinstance(outcome, LoopState):
+        pre_state_sig = _sig(outcome.messages)
         blob = json.dumps(outcome.to_dict(), ensure_ascii=False)
-        restored = Checkpoint.from_dict(json.loads(blob))
-        assert _sig(restored.state.messages) == pre_state_sig
-        msgs, outcome = await collect_turn(dist_engine, restored.state)
+        restored = LoopState.from_dict(json.loads(blob))
+        assert _sig(restored.messages) == pre_state_sig
+        msgs, outcome = await collect_turn(dist_engine, restored)
         collected.extend(msgs)
         hops += 1
         assert hops < 10, "resume did not converge (infinite loop guard)"
@@ -71,12 +71,12 @@ async def test_distributed_resume_matches_full_run():
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_state_has_no_dangling_tool_use():
-    """Every tool_use in Checkpoint.state.messages has a matching tool_result (pairing invariant)."""
+async def test_loopstate_has_no_dangling_tool_use():
+    """Every tool_use in LoopState.messages has a matching tool_result (pairing invariant)."""
     engine = FridayAgent(provider=FakeLLMProvider(responses=_scripted_responses()), tools=[ExampleTool()])
     _, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("run example")]))
-    assert isinstance(outcome, Checkpoint)
-    msgs = outcome.state.messages
+    assert isinstance(outcome, LoopState)
+    msgs = outcome.messages
     tool_use_ids = {b.id for m in msgs for b in m.content if b.type == "tool_use"}
     tool_result_ids = {b.tool_use_id for m in msgs for b in m.content if b.type == "tool_result"}
     assert tool_use_ids <= tool_result_ids, "dangling tool_use (no matching tool_result)"

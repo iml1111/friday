@@ -35,7 +35,7 @@ _MODEL="claude-sonnet-4-6"
 from _env import create_provider, resolve_api_key
 from friday_agent.api.provider import ContextOverflowError
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import Message, create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
 
@@ -96,7 +96,7 @@ async def main() -> int:
                 outcome = None
                 try:
                     async for item in engine.step(state):
-                        if isinstance(item, (Checkpoint, Terminal)):
+                        if isinstance(item, (LoopState, Terminal)):
                             outcome = item
                         else:
                             _print_new_messages([item])   # per-message live render
@@ -109,7 +109,7 @@ async def main() -> int:
                 if isinstance(outcome, Terminal):
                     terminal = outcome
                     break
-                state = outcome.state
+                state = outcome
                 if turns >= _MAX_TURNS:
                     break
         except Exception as exc:

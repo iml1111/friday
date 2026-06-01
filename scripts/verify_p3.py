@@ -25,7 +25,7 @@ if not _MODEL:
 
 from _env import create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
 
@@ -97,12 +97,12 @@ async def main() -> int:
     while turns < _CAP:
         outcome = None
         async for item in engine.step(state):
-            if isinstance(item, (Checkpoint, Terminal)):
+            if isinstance(item, (LoopState, Terminal)):
                 outcome = item
         turns += 1
         if isinstance(outcome, Terminal):
             break
-        state = outcome.state
+        state = outcome
         accumulated = state
 
     pre_count = len(accumulated.messages)
@@ -122,9 +122,9 @@ async def main() -> int:
     # Continuation: one more step on the compacted state must proceed without error.
     cont_outcome = None
     async for item in engine.step(compacted):
-        if isinstance(item, (Checkpoint, Terminal)):
+        if isinstance(item, (LoopState, Terminal)):
             cont_outcome = item
-    continued_ok = isinstance(cont_outcome, (Checkpoint, Terminal))
+    continued_ok = isinstance(cont_outcome, (LoopState, Terminal))
 
     print("\n--- Checklist ---")
     checks = {

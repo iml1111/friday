@@ -29,7 +29,7 @@ run_one_turn() 한 번
  1. normalize_for_api() → provider.complete() 호출
  2. stop_reason 분기:
       end_turn  → Terminal(completed)
-      tool_use  → run_tools() → tool_result 추가 → 다음 턴(Checkpoint)
+      tool_use  → run_tools() → tool_result 추가 → 다음 턴(LoopState)
  ContextOverflowError → 호출자가 engine.compact(state) → 재시도
  LLMError → Terminal(model_error) + tool_result 백필
 ```
@@ -113,7 +113,7 @@ OPENAI_API_KEY=sk-...            # gpt-* 모델 사용 시
 
 ```python
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import LoopState, Checkpoint, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
@@ -123,7 +123,7 @@ while True:
     try:
         outcome = None
         async for item in engine.step(state):   # 한 턴 실행 — 각 Message 도착 즉시 yield
-            if isinstance(item, (Checkpoint, Terminal)):
+            if isinstance(item, (LoopState, Terminal)):
                 outcome = item
             else:
                 print(item)                     # 어시스턴트 응답 / tool_result 실시간 처리
@@ -132,7 +132,7 @@ while True:
         continue
     if isinstance(outcome, Terminal):
         break                                   # 종료
-    state = outcome.state                       # 다음 턴
+    state = outcome                             # 다음 턴 (LoopState를 그대로 사용)
 ```
 
 마지막으로 받은 item이 `Terminal`이면 루프를 종료합니다. `terminal.reason`은 `completed` / `model_error` 중 하나입니다.
@@ -252,31 +252,31 @@ class WeatherTool(Tool):
 
 ## 분산 재개 (stateless)
 
-멀티턴을 **턴 단위로 끊어 여러 컨테이너에 분산**하려면 `step()`과 직렬화 API를 씁니다 — 한 턴 = 한 단위, `Checkpoint` = 컨테이너 경계를 넘는 유일한 상태입니다.
+멀티턴을 **턴 단위로 끊어 여러 컨테이너에 분산**하려면 `step()`과 직렬화 API를 씁니다 — 한 턴 = 한 단위, `LoopState` = 컨테이너 경계를 넘는 유일한 상태입니다.
 
 ```python
 import json
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 
 # 컨테이너 A — 첫 턴
 state = LoopState(messages=[create_user_message("질문")])
 outcome = None
 async for item in engine.step(state):           # 한 턴 실행
-    if isinstance(item, (Checkpoint, Terminal)):
+    if isinstance(item, (LoopState, Terminal)):
         outcome = item
     else:
         persist(item)                           # Message 실시간 처리
-if isinstance(outcome, Checkpoint):
-    blob = json.dumps(outcome.to_dict())        # 최종 Checkpoint sentinel 직렬화해 저장/이송
+if isinstance(outcome, LoopState):
+    blob = json.dumps(outcome.to_dict())        # 최종 LoopState sentinel 직렬화해 저장/이송
 
 # 컨테이너 B (다른 시스템) — blob을 로드해 이어서
-state = Checkpoint.from_dict(json.loads(blob)).state
+state = LoopState.from_dict(json.loads(blob))
 async for item in engine.step(state):           # 다음 턴 … Terminal까지 반복
     ...
 ```
 
-체크포인트는 항상 깨끗한 턴 경계에서만 나오므로(`tool_use`↔`tool_result` 정합 보존) `Checkpoint.state`를 그대로 직렬화·재개할 수 있습니다. 설계 상세는 [01-core-loop](docs/architecture/01-core-loop.md) 참조.
+루프 상태는 항상 깨끗한 턴 경계에서만 업데이트되므로(`tool_use`↔`tool_result` 정합 보존) `LoopState`를 그대로 직렬화·재개할 수 있습니다. 설계 상세는 [01-core-loop](docs/architecture/01-core-loop.md) 참조.
 
 ## 다른 LLM 백엔드로 교체하기
 
