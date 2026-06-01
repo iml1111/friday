@@ -22,7 +22,7 @@ Half the answer is already in the current structure.
 - `Tool.call(args) -> ToolResult` is just an async function (`tools/base.py`). The loop (`run_one_turn`) has no idea **where** a tool runs — `run_tools` simply awaits `call()`, takes the `ToolResult`, and carries it into the next turn.
 - **The wire format already exists too.** Server→client is a serialized `tool_use` (name + input); client→server is a `tool_result` (data + is_error). That is, Friday's data model **becomes the server-client protocol as-is**.
 
-> **Conclusion**: browser control means adding one kind of "remote tool". Instead of executing locally, `call()` just sends the command down to the extension and fetches the result back. The loop · orchestrator · Checkpoint are **unmodified**.
+> **Conclusion**: browser control means adding one kind of "remote tool". Instead of executing locally, `call()` just sends the command down to the extension and fetches the result back. The loop · orchestrator · state-transition structure are **unmodified**.
 
 ---
 
@@ -38,7 +38,7 @@ This is an SDK *application*, not an SDK *change*, and it is consistent with the
 
 | Decision | Choice | Rationale | Rejected alternatives |
 |---|---|---|---|
-| **Persistence model** | A single always-on **stateful server + synchronous await** | Loop · Checkpoint unmodified. The remote tool's `call()` simply awaits the response future. Simplest. | **Tool-boundary suspend/resume** — more robust to process restarts · horizontal scaling, but suspending · resuming *mid*-turn requires machinery such as a new sentinel. Overkill at this stage. (→ §14 migration conditions) |
+| **Persistence model** | A single always-on **stateful server + synchronous await** | Loop · state-transition structure unmodified. The remote tool's `call()` simply awaits the response future. Simplest. | **Tool-boundary suspend/resume** — more robust to process restarts · horizontal scaling, but suspending · resuming *mid*-turn requires machinery such as a new sentinel. Overkill at this stage. (→ §14 migration conditions) |
 | **Control logic location** | **Hybrid** (primitive RPC + a few macros) | Fine-grained control via primitives; macros save turns on common flows. | **Pure thin** (multi-step blows up the turn count) · **pure thick** (logic scattered to the client, frequent extension updates, agent control ↓) |
 | **Command granularity** | **Stepwise primitives (A) as the foundation + linear batch (C) as an option** | A interacts robustly with pages that change in real time; C saves turns on deterministic sequences. C is just A sent ahead of time — same executor. | **pure-A** (wastes turns on long deterministic flows) · **pure-C** (blind during the batch → fragile on dynamic pages) · **branching/DSL batch** (needs a client interpreter; future) |
 

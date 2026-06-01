@@ -1,7 +1,7 @@
-"""Serde round-trips for messages, state, and checkpoints via type to_dict/from_dict methods."""
+"""Serde round-trips for messages and state via type to_dict/from_dict methods."""
 import json
 
-from friday_agent.core.state import LoopState, Checkpoint
+from friday_agent.core.state import LoopState
 from friday_agent.messages.types import Message, ContentBlock, create_user_message
 
 
@@ -55,10 +55,3 @@ def test_loop_state_roundtrip_defaults():
     s = LoopState(messages=[create_user_message("hi")])
     back = LoopState.from_dict(json.loads(json.dumps(s.to_dict())))
     assert back.turn_count == 1
-
-
-def test_checkpoint_roundtrip():
-    cp = Checkpoint(state=LoopState(messages=[create_user_message("hi")], turn_count=2))
-    back = Checkpoint.from_dict(json.loads(json.dumps(cp.to_dict())))
-    assert back.state.turn_count == 2
-    assert len(back.state.messages) == 1

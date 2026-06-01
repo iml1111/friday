@@ -6,7 +6,7 @@ from friday_agent.api.provider import (
     AssistantResponse, StopReason, TextBlock, ToolUseBlock, TokenUsage,
 )
 from friday_agent.core.loop import run_one_turn
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
 from tests.fakes import FakeLLMProvider
@@ -44,7 +44,7 @@ async def test_run_one_turn_end_turn_yields_terminal_completed():
 
 
 @pytest.mark.asyncio
-async def test_run_one_turn_tool_use_yields_checkpoint():
+async def test_run_one_turn_tool_use_yields_loopstate():
     tool_use = AssistantResponse(
         content=[ToolUseBlock(id="tu1", name="ExampleTool", input={"payload": "x", "mutating": False})],
         stop_reason=StopReason.TOOL_USE, usage=TokenUsage(),
@@ -54,10 +54,10 @@ async def test_run_one_turn_tool_use_yields_checkpoint():
 
     messages, sentinel = await _drain(_run_one(provider, [ExampleTool()], state))
 
-    assert isinstance(sentinel, Checkpoint)
-    assert sentinel.state.turn_count == 2
-    assert any(b.type == "tool_use" for m in sentinel.state.messages for b in m.content)
-    assert any(b.type == "tool_result" for m in sentinel.state.messages for b in m.content)
+    assert isinstance(sentinel, LoopState)
+    assert sentinel.turn_count == 2
+    assert any(b.type == "tool_use" for m in sentinel.messages for b in m.content)
+    assert any(b.type == "tool_result" for m in sentinel.messages for b in m.content)
     assert any(b.type == "tool_result" for m in messages for b in m.content)
 
 

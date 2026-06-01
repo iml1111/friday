@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 
 from friday_agent.api.provider import ContextOverflowError, LLMConfig, LLMProvider
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import Message
 from friday_agent.tools.base import Tool
 
@@ -38,10 +38,10 @@ async def drive(
     )
     state = LoopState(messages=list(messages))
     while True:
-        outcome: "Checkpoint | Terminal | None" = None
+        outcome: "LoopState | Terminal | None" = None
         try:
             async for item in engine.step(state):
-                if isinstance(item, (Checkpoint, Terminal)):
+                if isinstance(item, (LoopState, Terminal)):
                     outcome = item
                 else:
                     yield item
@@ -51,23 +51,23 @@ async def drive(
         if isinstance(outcome, Terminal):
             yield outcome
             return
-        state = outcome.state
+        state = outcome
 
 
 async def collect_turn(
     engine: FridayAgent, state: LoopState
-) -> "tuple[list[Message], Checkpoint | Terminal]":
+) -> "tuple[list[Message], LoopState | Terminal]":
     """Drain one engine.step() turn → (messages, final sentinel). Test convenience.
 
     Replaces the removed StepOutcome for call sites that inspect a turn after it
     completes rather than rendering messages live.
     """
     messages: list[Message] = []
-    outcome: "Checkpoint | Terminal | None" = None
+    outcome: "LoopState | Terminal | None" = None
     async for item in engine.step(state):
-        if isinstance(item, (Checkpoint, Terminal)):
+        if isinstance(item, (LoopState, Terminal)):
             outcome = item
         else:
             messages.append(item)
-    assert outcome is not None, "step() must yield a Checkpoint or Terminal sentinel"
+    assert outcome is not None, "step() must yield a LoopState or Terminal sentinel"
     return messages, outcome

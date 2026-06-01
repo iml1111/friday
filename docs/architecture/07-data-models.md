@@ -14,8 +14,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | Conversation history unit |
 | `ContentBlock` (internal flat) | `messages/types.py` | ✅ | Block inside a Message |
-| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count) |
-| `Checkpoint` | `core/state.py` | ✅ | Turn-boundary resume sentinel — the transport unit is `json.dumps(checkpoint.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
 | Everything else | — | ❌ | Runtime-only (provider, config, responses, tool results, etc.) |
 
 ---
@@ -55,22 +54,14 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 
 ### 2.2 Loop State / Control — `core/state.py` → details [01-core-loop](01-core-loop.md)
 
-#### `LoopState` — serializable loop state
+#### `LoopState` — serializable loop state and the "continue" sentinel
 
 | Field | Type | Meaning |
 |---|---|---|
 | `messages` | `list[Message]` | Full history |
 | `turn_count` | `int` (default 1) | Turn counter |
 
-Non-serializable runtime objects such as provider and config are intentionally excluded.
-
-#### `Checkpoint` — the "continue" sentinel
-
-| Field | Type | Meaning |
-|---|---|---|
-| `state` | `LoopState` | Next-turn state |
-
-When the loop continues after a turn completes, `run_one_turn()` yields it (in contrast to Terminal).
+Non-serializable runtime objects such as provider and config are intentionally excluded. When the loop continues after a turn completes, `run_one_turn()` yields this `LoopState` as-is (in contrast to `Terminal`).
 
 #### `Terminal` — the "terminate" sentinel
 
@@ -182,8 +173,7 @@ provider.complete()
 
 [turn-boundary transport]
    LoopState(messages=[Message], turn_count)
-        └─ Checkpoint(state)
-              └─ json.dumps(checkpoint.to_dict())   ← distributed resume unit
+        └─ json.dumps(loopstate.to_dict())   ← distributed resume unit
 ```
 
 ---

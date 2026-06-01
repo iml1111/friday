@@ -6,10 +6,10 @@ ContextOverflowError propagates to the caller (caller-owned compaction); on any
 error path, unfinished tool_use blocks receive a synthetic error
 tool_result so the tool_use<->tool_result pairing stays valid.
 
-A turn ends by yielding exactly one sentinel: Terminal (loop done) or Checkpoint
-(loop may continue, carrying the next LoopState). The caller drives the turn loop
-by calling run_one_turn() in a while-true, advancing state on each Checkpoint until
-a Terminal appears — there is no batch driver and no internal compaction.
+A turn ends by yielding exactly one sentinel: Terminal (loop done) or the next
+LoopState (loop may continue). The caller drives the turn loop by calling
+run_one_turn() in a while-true, advancing state on each LoopState until a Terminal
+appears — there is no batch driver and no internal compaction.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from friday_agent.api.provider import (
     ToolUseBlock,
 )
 from friday_agent.api.prompts import assemble_system_prompt
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import (
     ContentBlock,
@@ -117,13 +117,12 @@ async def run_one_turn(
     system_prompt: str = "",
     config: LLMConfig | None = None,
     max_concurrency: int = 10,
-) -> AsyncGenerator[Message | Terminal | Checkpoint, None]:
+) -> AsyncGenerator[Message | Terminal | LoopState, None]:
     """Execute a single turn of the agent loop.
 
     Yields all Messages produced in this turn, then yields exactly one sentinel:
       - Terminal: loop ends (completed / model_error).
-      - Checkpoint: loop continues (next_turn), carrying the updated LoopState for
-                    the next turn.
+      - LoopState: loop continues (next_turn) — the updated state for the next turn.
 
     Args:
         provider: LLM backend; only complete() is called.
@@ -136,8 +135,8 @@ async def run_one_turn(
 
     Yields:
         Message: messages produced this turn (assistant response, tool_result messages).
-        Terminal | Checkpoint: exactly one sentinel as the final yield —
-            Terminal when the loop ends, Checkpoint when it continues.
+        Terminal | LoopState: exactly one sentinel as the final yield —
+            Terminal when the loop ends, LoopState when it continues.
 
     Raises:
         ContextOverflowError: when the provider rejects the messages as too long.
@@ -200,10 +199,8 @@ async def run_one_turn(
 
     next_turn_count = turn_count + 1
 
-    # Continuation: yield Checkpoint with the assembled next-turn state.
-    yield Checkpoint(
-        state=LoopState(
-            messages=[*messages_for_query, *assistant_messages, *tool_results],
-            turn_count=next_turn_count,
-        ),
+    # Continuation: yield the assembled next-turn LoopState.
+    yield LoopState(
+        messages=[*messages_for_query, *assistant_messages, *tool_results],
+        turn_count=next_turn_count,
     )

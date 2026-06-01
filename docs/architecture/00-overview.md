@@ -32,13 +32,13 @@ async for item in engine.step(state):   ← AsyncGenerator
    │
    ├─ yield: AssistantMessage          ← immediately on response arrival
    ├─ yield: tool_result Message…      ← each tool result
-   └─ yield: Checkpoint | Terminal     ← exactly 1 final sentinel
+   └─ yield: LoopState | Terminal      ← exactly 1 final sentinel
         On ContextOverflowError → caller runs engine.compact(state), then retries
 
-If item is Checkpoint, update state = item.state and call step() again; if Terminal, stop.
+If item is LoopState, call step() again with it as-is; if Terminal, stop.
 ```
 
-Emitting a serializable `Checkpoint(LoopState)` at each turn boundary supports **stateless distributed resume**.
+Emitting the serializable `LoopState` as-is at each turn boundary supports **stateless distributed resume**.
 
 ---
 
@@ -110,5 +110,5 @@ python scripts/run_agent.py
 
 The library exposes only the single-turn `FridayAgent.step()` and externalizes the while-true driver to the caller. This decision has two key benefits.
 
-1. **Stateless distributed resume** — since a serializable `Checkpoint(LoopState)` is emitted at every turn boundary, state can be restored even across process restarts or in distributed-queue environments. JSON serde is handled by the types' (`Checkpoint`/`LoopState`/`Message`) `to_dict()`/`from_dict()` methods.
+1. **Stateless distributed resume** — since the serializable `LoopState` is emitted as-is at every turn boundary, state can be restored even across process restarts or in distributed-queue environments. JSON serde is handled by the types' (`LoopState`/`Message`) `to_dict()`/`from_dict()` methods.
 2. **Separation of context-management responsibility** — propagating `ContextOverflowError` to the caller keeps the library internals simple and lets the caller directly control the compact strategy (timing · summarization method) (`engine.compact(state)`).

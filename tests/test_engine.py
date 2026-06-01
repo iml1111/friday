@@ -5,7 +5,7 @@ Verifies the step() API and the tests/_drive.py driver:
   - system_prompt is forwarded to provider.complete().
   - drive() collects emitted messages.
   - provider is a required argument.
-  - step() checkpoint-and-resume flow across turns.
+  - step() continue-and-resume flow across turns.
 """
 import pytest
 
@@ -13,7 +13,7 @@ from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
 from friday_agent.context.compact import SUMMARIZER_SYSTEM_PROMPT
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
 from tests._drive import drive, collect_turn
@@ -115,7 +115,7 @@ async def test_step_single_turn_completed():
 
 @pytest.mark.asyncio
 async def test_step_resumes_to_completion():
-    """step() yields a Checkpoint after tool_use; a second step() resumes and completes."""
+    """step() yields a LoopState after tool_use; a second step() resumes and completes."""
     tool_use = AssistantResponse(
         content=[ToolUseBlock(id="tu1", name="ExampleTool", input={"payload": "x", "mutating": False})],
         stop_reason=StopReason.TOOL_USE, usage=TokenUsage(),
@@ -124,10 +124,10 @@ async def test_step_resumes_to_completion():
     engine = FridayAgent(provider=FakeLLMProvider(responses=[tool_use, end]), tools=[ExampleTool()])
 
     _, outcome1 = await collect_turn(engine, LoopState(messages=[create_user_message("run example")]))
-    assert isinstance(outcome1, Checkpoint)
-    assert outcome1.state.turn_count == 2
+    assert isinstance(outcome1, LoopState)
+    assert outcome1.turn_count == 2
 
-    msgs2, outcome2 = await collect_turn(engine, outcome1.state)
+    msgs2, outcome2 = await collect_turn(engine, outcome1)
     assert isinstance(outcome2, Terminal)
     assert outcome2.reason == "completed"
     assert any(b.type == "text" and b.text == "done" for m in msgs2 for b in m.content)

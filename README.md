@@ -29,7 +29,7 @@ run_one_turn() once
  1. normalize_for_api() → provider.complete() call
  2. stop_reason branch:
       end_turn  → Terminal(completed)
-      tool_use  → run_tools() → append tool_result → next turn (Checkpoint)
+      tool_use  → run_tools() → append tool_result → next turn (LoopState)
  ContextOverflowError → caller runs engine.compact(state) → retry
  LLMError → Terminal(model_error) + tool_result backfill
 ```
@@ -113,7 +113,7 @@ calls a tool and then finishes with a final answer.
 
 ```python
 from friday_agent.core.engine import FridayAgent
-from friday_agent.core.state import LoopState, Checkpoint, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
@@ -123,7 +123,7 @@ while True:
     try:
         outcome = None
         async for item in engine.step(state):   # run one turn — yields each Message as soon as it arrives
-            if isinstance(item, (Checkpoint, Terminal)):
+            if isinstance(item, (LoopState, Terminal)):
                 outcome = item
             else:
                 print(item)                     # handle assistant responses / tool_result in real time
@@ -132,7 +132,7 @@ while True:
         continue
     if isinstance(outcome, Terminal):
         break                                   # stop
-    state = outcome.state                       # next turn
+    state = outcome                             # next turn (use the LoopState as-is)
 ```
 
 If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`.
@@ -252,31 +252,31 @@ All core code lives under `friday_agent/`. For each file's responsibility and en
 
 ## Distributed Resume (stateless)
 
-To **split a multi-turn run turn by turn and distribute it across multiple containers**, use `step()` and the serialization API — one turn = one unit, and `Checkpoint` = the only state that crosses container boundaries.
+To **split a multi-turn run turn by turn and distribute it across multiple containers**, use `step()` and the serialization API — one turn = one unit, and `LoopState` = the only state that crosses container boundaries.
 
 ```python
 import json
-from friday_agent.core.state import Checkpoint, LoopState, Terminal
+from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 
 # Container A — first turn
 state = LoopState(messages=[create_user_message("Question")])
 outcome = None
 async for item in engine.step(state):           # run one turn
-    if isinstance(item, (Checkpoint, Terminal)):
+    if isinstance(item, (LoopState, Terminal)):
         outcome = item
     else:
         persist(item)                           # handle Messages in real time
-if isinstance(outcome, Checkpoint):
-    blob = json.dumps(outcome.to_dict())        # serialize the final Checkpoint sentinel to store/transport
+if isinstance(outcome, LoopState):
+    blob = json.dumps(outcome.to_dict())        # serialize the final LoopState sentinel to store/transport
 
 # Container B (a different system) — load the blob and continue
-state = Checkpoint.from_dict(json.loads(blob)).state
+state = LoopState.from_dict(json.loads(blob))
 async for item in engine.step(state):           # next turn … repeat until Terminal
     ...
 ```
 
-Because checkpoints are only ever emitted at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `Checkpoint.state` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
+Because the loop state is only ever updated at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `LoopState` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
 
 ## Swapping In a Different LLM Backend
 

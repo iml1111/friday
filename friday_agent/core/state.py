@@ -1,8 +1,8 @@
 """Loop state dataclasses.
 
 Defines the data structures passed across iterations of the agent loop:
-Terminal (loop exit), LoopState (serializable subset), and
-Checkpoint (serializable transport unit for distributed resume).
+Terminal (loop exit) and LoopState — the serializable loop state, which also
+serves as the "continue" sentinel and the transport unit for distributed resume.
 """
 from __future__ import annotations
 
@@ -35,9 +35,10 @@ class Terminal:
 # ---------------------------------------------------------------------------
 @dataclass
 class LoopState:
-    """Serializable subset of loop state, suitable for distributed resume.
+    """Serializable loop state, suitable for distributed resume.
 
-    Carries messages and turn_count across iterations via Checkpoint.
+    Carries messages and turn_count across iterations; run_one_turn() yields it
+    directly as the "continue" sentinel at each turn boundary.
     tool_use_context and pending_tool_use_summary are intentionally excluded:
     they are non-serializable runtime objects.
     """
@@ -56,24 +57,3 @@ class LoopState:
             messages=[Message.from_dict(m) for m in d.get("messages", [])],
             turn_count=d.get("turn_count", 1),
         )
-
-
-# ---------------------------------------------------------------------------
-# Checkpoint — resumable state at a turn boundary (contrast: Terminal)
-# ---------------------------------------------------------------------------
-@dataclass
-class Checkpoint:
-    """Yielded by run_one_turn() when a turn completes and the loop may continue.
-
-    Unlike Terminal, a Checkpoint means the loop has not ended — the embedded
-    LoopState is the serializable transport unit for distributed resume. The
-    container transport unit is ``json.dumps(checkpoint.to_dict())``.
-    """
-    state: LoopState
-
-    def to_dict(self) -> dict:
-        return {"state": self.state.to_dict()}
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Checkpoint":
-        return cls(state=LoopState.from_dict(d["state"]))
