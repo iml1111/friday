@@ -21,6 +21,34 @@ class ToolResult:
 
 
 # ---------------------------------------------------------------------------
+# Schema helpers
+# ---------------------------------------------------------------------------
+
+def _inline_defs(schema: dict) -> dict:
+    """Return a self-contained schema: every $ref to #/$defs/* replaced by the
+    referenced definition inlined, then $defs removed. Pydantic factors nested
+    models and enums into $defs; the model never sees them unless inlined. Sibling
+    keys beside a $ref (e.g. a field-level description) are merged over the resolved
+    definition. Produces a flat schema with no $ref/$defs — accepted by every
+    provider including OpenAI strict mode. (Assumes non-recursive models, which the
+    Pydantic-defined tool inputs are.)"""
+    defs = schema.pop("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                target = resolve(defs.get(node["$ref"].rsplit("/", 1)[-1], {}))
+                siblings = {k: resolve(v) for k, v in node.items() if k != "$ref"}
+                return {**target, **siblings}
+            return {k: resolve(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [resolve(x) for x in node]
+        return node
+
+    return resolve(schema)
+
+
+# ---------------------------------------------------------------------------
 # Tool ABC
 # ---------------------------------------------------------------------------
 
@@ -51,10 +79,10 @@ class Tool(ABC):
 
     def get_tool_schema(self) -> dict:
         """Build the tool schema dict to send to the API."""
-        schema = self.input_schema().model_json_schema()
-        # Remove Pydantic v2 metadata keys not expected by the API
+        schema = _inline_defs(self.input_schema().model_json_schema())
+        # Drop the cosmetic top-level title. $defs/$ref are already inlined away by
+        # _inline_defs, so nested models/enums (e.g. TodoItem.status) reach the model.
         schema.pop("title", None)
-        schema.pop("$defs", None)
         return {
             "name": self.name,
             "description": self.__class__.__doc__ or "",
