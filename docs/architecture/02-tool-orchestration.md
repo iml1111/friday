@@ -157,13 +157,13 @@ ToolResult(
 
 ### `get_tool_schema()`
 
-`tools/base.py:124` — Pydantic v2 스키마에서 `title`과 `$defs`를 제거하고 API에 전달할 형태로 반환한다.
+`tools/base.py:80` — Pydantic v2 스키마에서 `$defs`를 인라인 전개해 제거하고 최상위 `title`을 제거한 뒤 API에 전달할 형태로 반환한다. 인라인(`_inline_defs`)은 중첩 모델·enum(예: `TodoItem.status`)이 댕글링 `$ref` 없이 모델에 그대로 노출되게 한다 — 안 그러면 `$ref`만 남아 모델이 enum 제약을 못 본다.
 
 ```python
 {
     "name": self.name,
     "description": "...",
-    "input_schema": { ... }  # title, $defs 제거됨
+    "input_schema": { ... }  # 최상위 title 제거; $defs는 인라인 전개 후 제거
 }
 ```
 

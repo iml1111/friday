@@ -180,7 +180,7 @@ pytest -v
 
 ### 영속 메모리
 
-세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)와 도구 `memory_save`/`memory_read`/`memory_delete`가 항상 등록되고, 메모리 지침 + 자동 인덱스가 `step()`에서 세션 시작 시 1회 시스템 프롬프트에 주입된다.
+세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)와 도구 `memory_save`/`memory_read`/`memory_delete`가 항상 등록되고, 메모리 지침 + 자동 인덱스가 `step()`에서 매 턴 재조립돼 시스템 프롬프트에 주입된다(캐시 없음 — 분산 재개 시 인덱스가 재개 시점 store 상태를 fresh 반영).
 
 `MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**하므로, 자신의 store를 주입하면 기본 store와 도구가 통째로 대체된다:
 
@@ -262,7 +262,7 @@ class WeatherTool(Tool):
 | `input_schema` | `input_schema()`가 반환하는 Pydantic 모델 | 모든 필드에 `Field(description=...)`를 달 것. 타입·required·기본값은 Pydantic이 자동 직렬화 |
 
 > 정적 docstring 대신 입력에 따라 설명을 동적으로 바꾸려면 `description()` 메서드를 오버라이드합니다(기본값이 docstring).
-> Pydantic v2 메타키 중 최상위 `title`/`$defs`만 제거되고, 위처럼 **필드별 `title`은 남습니다** — 정상입니다.
+> 최상위 `title`은 제거되고 `$defs`는 인라인 전개된 뒤 제거됩니다(중첩 모델·enum이 `$ref` 없이 그대로 노출 — 예: `status` enum 값들이 스키마에 직접 보임). 위처럼 **필드별 `title`은 남습니다** — 정상입니다.
 
 ### 실행 정책 메서드는 LLM에 전달되지 않는다
 
