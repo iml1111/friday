@@ -21,7 +21,7 @@
 - **Sonnet prefetch 랭킹**(CC 메커니즘 ②) 제외. index-only 주입 + on-demand read로 충분. (향후 `MemoryStore.search()` 확장점.)
 - **백그라운드 포크 추출**(CC 메커니즘 ③) 제외. friday엔 상주 프로세스 없음 — 인라인 자기주도 저장으로 대체.
 - **팀 메모리·scope 태그·시크릿 스캔** 제외. 단일 store 전제; 멀티테넌트 네임스페이싱은 외부 store 오버라이드 책임.
-- **매 턴 인덱스 갱신** 제외. 인덱스는 **세션 시작 스냅샷**(§5, D7).
+- ~~**매 턴 인덱스 갱신** 제외. 인덱스는 **세션 시작 스냅샷**~~ → **개정**: 인덱스는 매 턴(`step()` 진입 시) `build_memory_section`이 재조립한다(캐시 제거; §5, D7).
 - **`search` 기본 도구 아님**. 기본 도구는 save/read/delete 3종. 커스텀 store가 `tools()` 오버라이드로 search를 노출할 수 있다.
 - **세션/체크포인트 영속화**는 본 설계와 별개(기존 `LoopState` serde가 담당).
 
@@ -40,7 +40,7 @@
 | D2 | 읽기 = **인덱스 주입 + on-demand 본문 read** | 제안서 계승. |
 | D4 | 인덱스 = **store 메타데이터에서 자동 생성**(`load_index()`) | 제안서 계승(1단계 저장). |
 | D5 | 내용 모델 = **CC 4-타입 + Why/How + what-NOT-to-save + staleness** | 제안서 계승. |
-| D7 | 인덱스 주입 = **세션 시작 1회 스냅샷**(인스턴스 수명 캐시) | 제안서 계승. `system_prompt`가 세션-정적; 분산 재개 시 재구성마다 fresh. |
+| D7 | 인덱스 주입 = **매 턴 재구성**(캐시 없음) | (개정) 분산 환경은 엔진을 매 턴 재구성해 캐시가 재사용되지 않음 → 매 턴 조립으로 인덱스를 신선하게 유지하고 단일 프로세스 동작을 분산과 일치시킴. |
 
 ---
 
@@ -206,7 +206,6 @@ self._tools = assembled
 self._system_prompt = system_prompt
 self._config = config
 self._max_concurrency = max_concurrency
-self._memory_section: str | None = None      # 세션-시작 스냅샷 캐시(lazy, async라 __init__에서 못 만듦)
 ```
 
 - 기존 TodoWrite 전용 충돌 검사(`clash`)를 **전체 도구 유일성 검사로 일반화**한다(caller↔builtin, caller↔memory, memory↔builtin 모두 포괄).
@@ -215,11 +214,10 @@ self._memory_section: str | None = None      # 세션-시작 스냅샷 캐시(la
 
 ```python
 async def step(self, state: LoopState) -> AsyncGenerator[...]:
-    if self._memory_section is None:                                  # 1회(인스턴스 수명)
-        self._memory_section = await build_memory_section(self._memory)
+    memory_section = await build_memory_section(self._memory)         # 매 턴 재구성
     effective_prompt = (
-        f"{self._system_prompt}\n\n{self._memory_section}"
-        if self._system_prompt else self._memory_section
+        f"{self._system_prompt}\n\n{memory_section}"
+        if self._system_prompt else memory_section
     )
     tool_schemas = [tool.get_tool_schema() for tool in self._tools]
     async for item in run_one_turn(
@@ -270,8 +268,8 @@ Read a memory when it is relevant or the user asks. If a memory names a file,
 function, or flag, verify it still exists before relying on it — a memory saying X
 does not guarantee X exists now. If the user says to ignore memory, act as if empty.
 
-The memory index below is a session-start snapshot; memories you save this session
-appear in your tool_result immediately but in the index only next session."""
+The memory index below is rebuilt each turn from your saved memories; a memory you
+save appears in your tool_result immediately and in the index from the next turn on."""
 
 
 def render_index(entries: list[IndexEntry]) -> str:
@@ -328,10 +326,9 @@ class MemoryDeleteInput(BaseModel):
 [세션 시작 — FridayAgent(provider, ..., memory=None|store)]
   self._memory = store or FileMemoryStore()
   self._tools  = caller_tools + [TodoWrite()] + self._memory.tools()   # 충돌 시 ValueError
-  self._memory_section = None                                          # lazy
 
 [턴 루프 — caller가 step()으로 구동]
-  step() 첫 호출: self._memory_section = await build_memory_section(self._memory)  # 스냅샷
+  step() 매 호출: memory_section = await build_memory_section(self._memory)  # 매 턴 재구성
   effective = base + 메모리 섹션 → run_one_turn(system_prompt=effective)
     └─ assemble_system_prompt: + GENERAL + TODO
     └─ 모델이 인덱스를 봄
@@ -355,7 +352,7 @@ class MemoryDeleteInput(BaseModel):
 - **par-critical 정합**: 메모리 도구는 일반 도구 경로(orchestrator)를 타므로 `tool_use↔tool_result` 정합에 새 위험 0.
 - **분산 재개**: `MemoryStore`는 `LoopState`에 직렬화되지 않음(serde 불변, provider/tools와 동일 컨테이너-로컬 재주입). 컨테이너 B가 store로 재구성 + 섹션 재조립 → 인덱스 fresh.
 - **compaction 보존**: `compact()`가 대화를 요약 1개로 접어도 메모리는 Store에 독립 보존. 메모리는 ① 세션 내 compaction과 ② 세션 경계를 둘 다 넘는 연속성을 제공.
-- **세션-시작 스냅샷 함의**: 인스턴스 수명 캐시라, 같은 프로세스에서 여러 step에 걸쳐 저장한 메모리는 그 인스턴스의 인덱스엔 안 뜬다(다음 재구성에서 fresh). 단 에이전트는 `tool_result`로 즉시 인지하므로 세션 내 일관성 보존(제안서 D7).
+- **턴별 재구성 함의**: 매 턴 인덱스를 재조립하므로, 같은 프로세스에서 저장한 메모리도 다음 턴부터 인덱스에 뜬다(단일 프로세스가 분산과 동일 동작). 에이전트는 저장 즉시 `tool_result`로도 인지한다(제안서 D7 개정).
 - **always-on의 무해성 한계**: 메모리는 이제 항상 켜져 있어 "안 쓰면 no-op"은 아니다. 단 기본 `FileMemoryStore`가 lazy라 **사용 전 디스크 IO 0**이고, 빈 store는 "empty" 인덱스만 주입한다.
 
 ---

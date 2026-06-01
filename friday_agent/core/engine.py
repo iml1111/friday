@@ -80,7 +80,6 @@ class FridayAgent:
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
-        self._memory_section: str | None = None
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -99,14 +98,14 @@ class FridayAgent:
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
-        # Built once per instance (session-start snapshot) and cached. Callers drive
-        # step() sequentially, so this first-build check needs no lock.
-        if self._memory_section is None:
-            self._memory_section = await build_memory_section(self._memory)
+        # Rebuilt every turn from the store. In the distributed model the caller
+        # reconstructs the engine each turn, so caching this would never be reused;
+        # rebuilding keeps single-process behavior identical (index fresh per turn).
+        memory_section = await build_memory_section(self._memory)
         effective_prompt = (
-            f"{self._system_prompt}\n\n{self._memory_section}"
+            f"{self._system_prompt}\n\n{memory_section}"
             if self._system_prompt
-            else self._memory_section
+            else memory_section
         )
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(

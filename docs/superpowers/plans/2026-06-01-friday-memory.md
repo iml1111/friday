@@ -4,7 +4,7 @@
 
 **Goal:** Add an always-on, replaceable persistent-memory subsystem (`MemoryStore` owning both persistence and its tool surface) to `friday_agent`, wired in at the engine boundary with the core loop left unchanged.
 
-**Architecture:** A new `friday_agent/memory/` subsystem defines `MemoryStore` (ABC owning `save/read/delete/load_index` + a default `tools()`), a default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`), an `InMemoryStore`, three thin tools (`memory_save/read/delete`), and prompt assembly (`MEMORY_INSTRUCTIONS` + auto index). `FridayAgent` (the only engine change) defaults the store to `FileMemoryStore`, registers `store.tools()` alongside built-ins, and prepends a session-start memory section (async, lazily cached) to the system prompt in `step()`. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator stay byte-unchanged.
+**Architecture:** A new `friday_agent/memory/` subsystem defines `MemoryStore` (ABC owning `save/read/delete/load_index` + a default `tools()`), a default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`), an `InMemoryStore`, three thin tools (`memory_save/read/delete`), and prompt assembly (`MEMORY_INSTRUCTIONS` + auto index). `FridayAgent` (the only engine change) defaults the store to `FileMemoryStore`, registers `store.tools()` alongside built-ins, and rebuilds and prepends a per-turn memory section (async) to the system prompt in `step()`. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator stay byte-unchanged.
 
 **Tech Stack:** Python 3.11+, `pydantic` v2 (tool input schemas), `anyio`/`asyncio`, `pytest` + `pytest-asyncio` (`asyncio_mode=auto`). Tests are keyless via `tests/fakes.py::FakeLLMProvider`.
 
@@ -819,7 +819,7 @@ Create `friday_agent/memory/prompt.py`:
 """Memory system-prompt assembly: static instructions + auto-generated index.
 
 build_memory_section() is async (it reads the store's index). The engine builds it
-once per session (lazily cached) and prepends it to the base system prompt.
+every turn and prepends it to the base system prompt.
 """
 from __future__ import annotations
 
@@ -849,8 +849,8 @@ Read a memory when it is relevant or the user asks. If a memory names a file,
 function, or flag, verify it still exists before relying on it — a memory saying X
 does not guarantee X exists now. If the user says to ignore memory, act as if empty.
 
-The memory index below is a session-start snapshot; memories you save this session
-appear in your tool_result immediately but in the index only next session."""
+The memory index below is rebuilt each turn from your saved memories; a memory you
+save appears in your tool_result immediately and in the index from the next turn on."""
 
 
 def render_index(entries: list[IndexEntry]) -> str:
@@ -1069,20 +1069,18 @@ Then REPLACE the current tool-assembly block (currently `engine.py:64-77`, from 
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
-        self._memory_section: str | None = None
 ```
 
-- [ ] **Step 5: Modify `step()` — prepend the lazily-built memory section**
+- [ ] **Step 5: Modify `step()` — prepend the per-turn memory section**
 
 In `friday_agent/core/engine.py`, at the START of the `step()` body (before `tool_schemas = ...`), insert:
 
 ```python
-        if self._memory_section is None:
-            self._memory_section = await build_memory_section(self._memory)
+        memory_section = await build_memory_section(self._memory)
         effective_prompt = (
-            f"{self._system_prompt}\n\n{self._memory_section}"
+            f"{self._system_prompt}\n\n{memory_section}"
             if self._system_prompt
-            else self._memory_section
+            else memory_section
         )
 ```
 
@@ -1249,7 +1247,7 @@ Create the chapter (mirror the style of existing `0X-*.md` chapters):
 
 ## ④ 엔진 통합 (루프 무변경)
 
-`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 세션 시작 시 1회 `build_memory_section()`을 async로 조립해(인스턴스 수명 캐시 = 세션-시작 스냅샷) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다.
+`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 매 턴 `build_memory_section()`을 async로 조립해(턴별 재구성, 캐시 없음) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다.
 
 ## ⑤ 분산 안전
 
@@ -1257,7 +1255,7 @@ Create the chapter (mirror the style of existing `0X-*.md` chapters):
 
 ## ⑥ 비목표
 
-Sonnet prefetch 랭킹 · 백그라운드 포크 추출 · 팀 메모리/시크릿 스캔/scope 태그 · 매 턴 인덱스 갱신 제외. `search`는 기본 도구가 아니며 커스텀 store가 `tools()`로 노출할 수 있다.
+Sonnet prefetch 랭킹 · 백그라운드 포크 추출 · 팀 메모리/시크릿 스캔/scope 태그 제외. (인덱스는 `step()`마다 `build_memory_section`이 재조립한다 — 캐시 없음.) `search`는 기본 도구가 아니며 커스텀 store가 `tools()`로 노출할 수 있다.
 ```
 
 - [ ] **Step 8: Update `docs/architecture/00-overview.md` module map**
@@ -1328,7 +1326,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **2. Placeholder scan:** No "TBD"/"TODO"/"handle edge cases"/"similar to Task N". Every code step has complete code; every test step has runnable assertions. ✓
 
-**3. Type/name consistency:** `MemoryStore`, `MemoryEntry(name, description, type, body, updated_at)`, `IndexEntry(name, description, type, updated_at)`, `MemoryType`, tool names `memory_save`/`memory_read`/`memory_delete`, `build_memory_section(store)`, `MEMORY_INSTRUCTIONS`, `render_index(entries)`, engine `memory=` param and `self._memory_section` — all consistent across Tasks 1-6 and match the spec. `Tool` base import path `friday_agent.tools.base` and `ToolResult(data=..., is_error=...)` match the existing codebase. `is_concurrency_safe(self, input_data: dict)` signature matches `TodoWrite`. ✓
+**3. Type/name consistency:** `MemoryStore`, `MemoryEntry(name, description, type, body, updated_at)`, `IndexEntry(name, description, type, updated_at)`, `MemoryType`, tool names `memory_save`/`memory_read`/`memory_delete`, `build_memory_section(store)`, `MEMORY_INSTRUCTIONS`, `render_index(entries)`, engine `memory=` param — all consistent across Tasks 1-6 and match the spec. `Tool` base import path `friday_agent.tools.base` and `ToolResult(data=..., is_error=...)` match the existing codebase. `is_concurrency_safe(self, input_data: dict)` signature matches `TodoWrite`. ✓
 
 ---
 

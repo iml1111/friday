@@ -1,7 +1,7 @@
 """Memory system-prompt assembly: static instructions + auto-generated index.
 
 build_memory_section() is async (it reads the store's index). The engine builds it
-once per session (lazily cached) and prepends it to the base system prompt.
+every turn and prepends it to the base system prompt.
 """
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ Read a memory when it is relevant or the user asks. If a memory names a file,
 function, or flag, verify it still exists before relying on it — a memory saying X
 does not guarantee X exists now. If the user says to ignore memory, act as if empty.
 
-The memory index below is a session-start snapshot; memories you save this session
-appear in your tool_result immediately but in the index only next session."""
+The memory index below is rebuilt each turn from your saved memories; a memory you
+save appears in your tool_result immediately and in the index from the next turn on."""
 
 
 def render_index(entries: list[IndexEntry]) -> str:

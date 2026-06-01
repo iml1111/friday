@@ -40,7 +40,7 @@ friday는 현재 이 개념이 **전혀 없다**(확인: `friday_agent/` 전역�
 - **백그라운드 포크 추출**(CC 메커니즘 ③)은 넣지 않는다. friday엔 상주 프로세스가 없다 — 인라인 자기주도 저장으로 대체. (향후 caller-driven 추출 패스로 확장 가능.)
 - **팀 메모리·scope 태그·시크릿 스캔**은 범위 밖. 단일 store를 전제하고, 멀티테넌트 네임스페이싱은 외부 store 오버라이드의 책임으로 둔다.
 - **세션/체크포인트 영속화**는 본 설계와 별개다. 기존 `LoopState` 직렬화(caller 소유)가 담당한다. 본 설계는 메모리 store만 다룬다.
-- **매 턴 인덱스 갱신**은 하지 않는다. `system_prompt`가 세션-정적이므로 인덱스는 **세션 시작 스냅샷**이다(아래 §4.5).
+- ~~**매 턴 인덱스 갱신**은 하지 않는다. 인덱스는 **세션 시작 스냅샷**이다~~ → **개정**: 인덱스는 매 턴(`step()` 진입 시) `build_memory_section`이 재조립한다(캐시 제거; 아래 §4.5).
 
 ---
 
@@ -54,7 +54,7 @@ friday는 현재 이 개념이 **전혀 없다**(확인: `friday_agent/` 전역�
 | D4 | 인덱스 = **store 메타데이터에서 자동 생성** (`load_index()`) | CC의 수동 2단계 저장(본문+인덱스 포인터)을 **1단계로 축약**; 인덱스↔본문 드리프트 제거 |
 | D5 | 내용 모델 = **CC 4-타입 + 품질 가드레일 이식** | eval-검증된 택소노미(user/feedback/project/reference) + Why/How 본문 구조 + what-NOT-to-save + staleness caveat |
 | D6 | 통합 = **caller 소유 + 순수 주입** (엔진 무변경) | friday 철학(caller가 step/compact를 몰듯 메모리 주입도 caller가 몬다); 메모리 미배선 시 코어 영향 0 |
-| D7 | 주입 시점 = **세션 시작(생성) 시 1회 스냅샷** | `system_prompt`가 `FridayAgent.__init__` 인자로 세션-정적; "loop 시작시 주입" 요구와 일치 |
+| D7 | 주입 시점 = **매 턴 (`step()` 진입 시) 재구성** | (개정) 분산 환경은 엔진을 매 턴 재구성해 캐시가 재사용되지 않음 → 매 턴 조립으로 인덱스를 신선하게 유지; "loop 시작시 주입" 요구도 충족 |
 
 ---
 
@@ -150,7 +150,7 @@ description: 통합테스트는 실제 DB 사용, mock 금지
 
 ### 4.5 Recall 주입 — `build_memory_section` + `system_prompt` 접합
 
-`system_prompt`는 `FridayAgent.__init__` 인자로 **세션-정적**이다(`core/engine.py:49,65`). 따라서 메모리 인덱스는 **세션 시작(에이전트 생성) 시 1회** 조립해 `system_prompt`에 접합한다("loop 시작시 주입" 요구와 일치).
+`system_prompt`는 `FridayAgent.__init__` 인자로 **세션-정적**이다(`core/engine.py:49,65`). 메모리 인덱스는 **매 턴(`step()` 진입 시)** 조립해 그 뒤에 접합한다("loop 시작시 주입" 요구도 충족; 분산 환경에선 엔진이 매 턴 재구성되므로 캐시가 무의미).
 
 ```python
 async def build_memory_section(store: MemoryStore) -> str:
@@ -158,7 +158,7 @@ async def build_memory_section(store: MemoryStore) -> str:
     return f"{MEMORY_INSTRUCTIONS}\n\n{render_index(index)}"
 ```
 
-반환 텍스트 구조 — **정적 지침 먼저, 동적 인덱스는 끝**(캐싱 시 정적 prefix 보존):
+반환 텍스트 구조 — **정적 지침 먼저, 동적 인덱스는 끝**:
 
 ```
 {MEMORY_INSTRUCTIONS}                  ← 정적, 매 세션 동일
@@ -174,7 +174,7 @@ async def build_memory_section(store: MemoryStore) -> str:
 
 ```python
 store = FileMemoryStore("FRIDAY_MEMORY.md")
-section = await build_memory_section(store)              # 세션 시작 1회
+section = await build_memory_section(store)              # 매 턴 (step 진입 시)
 agent = FridayAgent(
     provider=provider,
     tools=[MemorySave(store), MemoryRead(store), MemoryDelete(store), *other_tools],
@@ -186,7 +186,7 @@ agent = FridayAgent(
 
 엔진의 `assemble_system_prompt(system_prompt)`가 뒤에 `GENERAL_AGENT_GUIDANCE`를 붙이므로 최종 순서는 `base → 메모리 섹션 → 일반 지침`.
 
-> **세션-정적 함의**: 에이전트가 세션 중 새 메모리를 저장해도 인덱스는 다음 세션에야 반영된다. 단 에이전트는 방금 저장한 내용을 `tool_result`로 즉시 인지하므로 이번 세션 내 일관성은 보존된다. 분산 재개 시 컨테이너 B는 `FridayAgent`를 재구성하며 `build_memory_section`을 **다시** 조립하므로, 인덱스가 재개 시점의 Store 상태를 신선하게 반영한다(매 턴 갱신보다 단순하고, 재개마다 fresh).
+> **턴별 재구성 함의**: `build_memory_section`이 매 턴(`step()` 진입 시) 재조립되므로, 에이전트가 저장한 새 메모리는 다음 턴부터 인덱스에 반영된다(저장 즉시엔 `tool_result`로 인지). 분산 재개 시 컨테이너 B도 `FridayAgent` 재구성 시 섹션을 다시 조립하므로 인덱스가 재개 시점 Store 상태를 신선하게 반영한다.
 
 ### 4.6 `MEMORY_INSTRUCTIONS` — CC `memdir` 지침 이식 (1단계 저장로 축약)
 
@@ -244,7 +244,7 @@ class MemorySave(Tool):
 ```
 [세션 시작]
   store = FileMemoryStore("FRIDAY_MEMORY.md")
-  section = build_memory_section(store)            # 지침 + 자동 인덱스(스냅샷)
+  section = build_memory_section(store)            # 지침 + 자동 인덱스
   agent = FridayAgent(tools=[memory_*, ...], system_prompt = base + section)
 
 [턴 루프 — caller가 step()으로 구동]
@@ -285,7 +285,6 @@ class MemorySave(Tool):
 | 백그라운드 포크 추출 | friday 상주 프로세스 없음(D1 인라인 write) | caller-driven 추출 패스 추가 가능 |
 | 팀 메모리·시크릿 스캔·scope 태그 | 단일 store; 네임스페이싱은 store 책임 | 외부 store가 처리 |
 | 세션/체크포인트 영속화 | 기존 `LoopState.to_dict` 메커니즘(caller 소유) | 메모리 설계와 별개 |
-| 매 턴 인덱스 갱신 | `system_prompt` 세션-정적(D7) | 재개마다 재조립으로 충분 |
 
 ---
 
@@ -329,7 +328,7 @@ class MemorySave(Tool):
   - `build_memory_section`: 빈 store → "empty" 문구, 항목 있으면 type별 인덱스 라인; 정적 지침이 동적 인덱스보다 앞.
   - `search`(기본): description/name substring 매칭.
 - **통합 (fake provider)**
-  - 모델이 `memory_save` 호출 → `FRIDAY_MEMORY.md`에 섹션 출현 → 다음 세션 `build_memory_section`에 인덱스 반영.
+  - 모델이 `memory_save` 호출 → `FRIDAY_MEMORY.md`에 섹션 출현 → 다음 턴/세션 `build_memory_section`에 인덱스 반영.
   - 모델이 `memory_read` 호출 → 본문 반환, 오래된 항목엔 caveat.
 - **분산**
   - 세션 A에서 저장 → Store(파일/외부)에 영속 → "컨테이너 B"에서 `FridayAgent` 재구성 + `build_memory_section` 재조립 → 인덱스 신선 반영. LoopState 직렬화에 메모리 본문이 새지 않음(분리 확인).

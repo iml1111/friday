@@ -22,7 +22,7 @@
 
 ## ④ 엔진 통합 (루프 무변경)
 
-`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 세션 시작 시 1회 `build_memory_section()`을 async로 조립해(인스턴스 수명 캐시 = 세션-시작 스냅샷) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다.
+`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 매 턴 `build_memory_section()`을 async로 조립해(턴별 재구성, 캐시 없음) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다.
 
 ## ⑤ 분산 안전
 
@@ -30,4 +30,4 @@
 
 ## ⑥ 비목표
 
-Sonnet prefetch 랭킹 · 백그라운드 포크 추출 · 팀 메모리/시크릿 스캔/scope 태그 · 매 턴 인덱스 갱신 제외. `search`는 기본 도구가 아니며 커스텀 store가 `tools()`로 노출할 수 있다.
+Sonnet prefetch 랭킹 · 백그라운드 포크 추출 · 팀 메모리/시크릿 스캔/scope 태그 제외. (인덱스는 `step()`마다 `build_memory_section`이 재조립한다 — 캐시 없음.) `search`는 기본 도구가 아니며 커스텀 store가 `tools()`로 노출할 수 있다.
