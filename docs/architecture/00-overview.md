@@ -100,9 +100,9 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 python -m pytest
 
 # 실 API 검증 (실 백엔드 호출 — 토큰 비용 발생)
-LLM_MODEL=<모델ID> python scripts/verify_p2.py   # 도구 오케스트레이션
-LLM_MODEL=<모델ID> python scripts/verify_p3.py   # 컨텍스트 오버플로 · compact 복구
-LLM_MODEL=<모델ID> python scripts/verify_p4.py   # 실 백엔드 엔드투엔드 · 어댑터 교체 실증
+LLM_MODEL=<모델ID> python scripts/verify/verify_p2.py   # 도구 오케스트레이션
+LLM_MODEL=<모델ID> python scripts/verify/verify_p3.py   # 컨텍스트 오버플로 · compact 복구
+LLM_MODEL=<모델ID> python scripts/verify/verify_p4.py   # 실 백엔드 엔드투엔드 · 어댑터 교체 실증
 
 # 로컬 예시 드라이버 실행
 python scripts/run_agent.py

@@ -147,13 +147,13 @@ while True:
 ```bash
 # 모델 ID는 LLM_MODEL 환경변수로 주입 (prefix로 provider 자동 라우팅)
 # P2 — 단일 도구 사이클: tool_use → tool_result → 최종 응답
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p2.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p2.py
 
 # P3 — 호출자 주도 compact 복구 검증 (engine.compact()를 명시 호출해 실백엔드 요약+연속성 확인)
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p3.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p3.py
 
 # P4 — 실 백엔드 엔드투엔드 + 어댑터 교체 구조 실증
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify_p4.py
+LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p4.py
 ```
 
 각 스크립트는 체크리스트를 출력하고 PASS/FAIL과 함께 종료 코드(0/1)를 반환합니다.

@@ -5,7 +5,7 @@ user turn carrying a text block appended AFTER tool_result blocks (the reminder
 joined onto a tool_result turn).
 
 Usage:
-    LLM_MODEL=<model-id> python scripts/verify_todo.py
+    LLM_MODEL=<model-id> python scripts/verify/verify_todo.py
 
 Cost guardrail: max_tokens=512; caller-side turn cap=6.
 """
@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ → import _env
 from _env import create_config, create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal

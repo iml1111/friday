@@ -9,7 +9,7 @@
 **구현 완료** — `friday_agent/` 패키지에 Phase 1~3(최소 루프 · 도구 오케스트레이션 · 컨텍스트 관리)이 모두 구현돼 있다. 실 백엔드 어댑터(Anthropic · OpenAI) + 모델 prefix 라우팅, stateless 분산 재개(LoopState)까지 포함한다. 아키텍처 문서(`docs/architecture/`)가 권위 기준이다.
 
 - 설치: `pip install -e ".[dev]"`  ·  테스트(키 불필요, fake provider): `python -m pytest`
-- 실 API 검증(토큰 비용 발생): `LLM_MODEL=<모델ID> python scripts/verify_p2.py` (P2~P4)
+- 실 API 검증(토큰 비용 발생): `LLM_MODEL=<모델ID> python scripts/verify/verify_p2.py` (P2~P4)
 - 코드 진입점 · 모듈 지도 · 읽는 순서는 `docs/architecture/00-overview.md`(특히 `#모듈-지도`) 참조.
 
 ## 아키텍처 문서 = 단일 진실 공급원
