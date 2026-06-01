@@ -188,6 +188,8 @@ ToolResult(
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.
 
+**Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names.
+
 ---
 
 ## ⑦ Design Rationale (Why)

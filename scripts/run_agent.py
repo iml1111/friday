@@ -19,6 +19,13 @@ tool_use → tool_result → response cycle immediately.
 ExampleTool echoes its input back as 'processed: X'. Replace the _dispatch
 in friday_agent/tools/builtin/example_tool.py to build real tools.
 
+TodoWrite is a built-in tool: FridayAgent auto-registers it and auto-injects its
+usage guidance, so the caller wires up nothing. For multi-step work the model calls
+TodoWrite; the tracked list is re-injected into every turn's API view as a
+<system-reminder> and is persisted here across user inputs (seeded into each turn's
+LoopState.todos). The live list is printed under a "── todo list ──" header whenever
+it changes so you can watch progress.
+
 Cost guardrail: max_tokens=1024; caller-side turn cap = 30 per input to limit spend.
 """
 from __future__ import annotations
@@ -56,25 +63,40 @@ def _print_new_messages(messages: list[Message]) -> None:
                 if block.text:
                     print(f"[assistant] {block.text}")
             elif block.type == "tool_use":
-                print(f"  [tool call] {block.name}({block.input})")
+                if block.name == "TodoWrite":
+                    # Keep the call line terse; the rendered list (below) shows the content.
+                    n = len(block.input.get("todos", [])) if isinstance(block.input, dict) else 0
+                    print(f"  [tool call] TodoWrite ({n} items)")
+                else:
+                    print(f"  [tool call] {block.name}({block.input})")
             elif block.type == "tool_result":
                 flag = " (error)" if block.is_error else ""
                 print(f"  [tool result{flag}] {block.content}")
+
+
+def _render_todos(todos: list[dict]) -> None:
+    """Print the current tracked todo list (human-readable)."""
+    if not todos:
+        return
+    print("  ── todo list ──")
+    for t in todos:
+        print(f"     - [{t.get('status', 'pending')}] {t.get('content', '')}")
 
 
 async def main() -> int:
     provider = create_provider(_MODEL, api_key=resolve_api_key(_MODEL))
     engine = FridayAgent(
         provider=provider,
-        tools=[ExampleTool()],
+        tools=[ExampleTool()],   # TodoWrite is auto-registered by FridayAgent (built-in)
         system_prompt=_SYSTEM_PROMPT,
         config=provider.config_type(max_tokens=_MAX_TOKENS),
     )
 
-    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool)")
+    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite is built-in)")
     print("Enter a prompt. To quit: exit / quit / Ctrl-D\n")
 
     history: list[Message] = []
+    todos: list[dict] = []   # session-level tracked task list (persists across user inputs)
     while True:
         try:
             line = input("> ").strip()
@@ -87,9 +109,10 @@ async def main() -> int:
             break
 
         history.append(create_user_message(line))
-        state = LoopState(messages=list(history))
+        state = LoopState(messages=list(history), todos=list(todos))
         collected: list[Message] = []
         terminal: Terminal | None = None
+        prev_todos = list(todos)
         turns = 0
         try:
             while True:
@@ -106,6 +129,9 @@ async def main() -> int:
                     state = await engine.compact(state)
                     continue
                 turns += 1
+                if isinstance(outcome, LoopState) and outcome.todos != prev_todos:
+                    _render_todos(outcome.todos)   # show the tracked list whenever it changes
+                    prev_todos = outcome.todos
                 if isinstance(outcome, Terminal):
                     terminal = outcome
                     break
@@ -121,6 +147,7 @@ async def main() -> int:
         # Messages were printed per-turn above; commit them to history once here so a
         # mid-loop error (handled above with history.pop()) rolls back the whole turn cleanly.
         history.extend(collected)
+        todos = state.todos   # commit the latest tracked todos so the next input sees them
 
         if terminal is None:
             print(f"  ── [loop stopped: turn cap {_MAX_TURNS} reached] ──")

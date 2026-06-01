@@ -47,12 +47,19 @@ Keep your text output brief and direct. Lead with the answer or action, not the 
  - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me check the file:" followed by a tool call should just be "Let me check the file." with a period."""
 
 
+TODO_GUIDANCE: str = """# Task tracking
+You have a TodoWrite tool for tracking multi-step work. For any task with several
+steps, call TodoWrite first to lay out the plan, then keep it updated as you go.
+ - Always send the COMPLETE list each call; it replaces the previous one.
+ - Keep exactly one item in_progress at a time; mark items completed the moment they are done.
+ - Skip it for trivial single-step tasks.
+The current list is surfaced to you each turn inside a <system-reminder>; it reflects tracked state, not necessarily the user's latest instruction."""
+
+
 def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
     """Assemble the full system prompt for a turn.
 
-    Injects the always-on general agent guidance (``GENERAL_AGENT_GUIDANCE``)
-    after the caller's base prompt and wraps the result in a ``SystemPrompt``.
-    There is no opt-out for the guidance.
+    Injects the always-on general agent guidance (``GENERAL_AGENT_GUIDANCE``) and the todo-tracking guidance (``TODO_GUIDANCE``) after the caller's base prompt; there is no opt-out.
 
     Args:
         system_prompt: The caller-provided base system prompt (may be empty).
@@ -60,9 +67,5 @@ def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
     Returns:
         The fully assembled ``SystemPrompt``.
     """
-    if system_prompt:
-        assembled = f"{system_prompt}\n\n{GENERAL_AGENT_GUIDANCE}"
-    else:
-        assembled = GENERAL_AGENT_GUIDANCE
-
-    return SystemPrompt(text=assembled)
+    blocks = [b for b in (system_prompt, GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE) if b]
+    return SystemPrompt(text="\n\n".join(blocks))
