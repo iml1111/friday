@@ -3,8 +3,9 @@ import time
 
 import pytest
 
-from friday_agent.memory.store import InMemoryStore, MemoryEntry, MemoryType
+from friday_agent.memory.store import MemoryEntry, MemoryType
 from friday_agent.memory.tool import MemoryDelete, MemoryRead, MemorySave
+from tests.fakes import InMemoryStore
 
 
 def test_default_tools_are_save_read_delete():

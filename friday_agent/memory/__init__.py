@@ -10,19 +10,16 @@ from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     FileMemoryStore,
     IndexEntry,
-    InMemoryStore,
     MemoryEntry,
     MemoryStore,
     MemoryType,
     build_memory_section,
-    render_index,
 )
 from friday_agent.memory.tool import MemoryDelete, MemoryRead, MemorySave
 
 __all__ = [
     "MemoryStore",
     "FileMemoryStore",
-    "InMemoryStore",
     "MemoryEntry",
     "IndexEntry",
     "MemoryType",
@@ -30,6 +27,5 @@ __all__ = [
     "MemoryRead",
     "MemoryDelete",
     "MEMORY_INSTRUCTIONS",
-    "render_index",
     "build_memory_section",
 ]
