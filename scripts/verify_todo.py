@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 
-from _env import create_provider, resolve_api_key
+from _env import create_config, create_provider, resolve_api_key
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import Message, create_user_message
@@ -63,7 +63,7 @@ async def main() -> int:
         sys.exit("Set the LLM_MODEL environment variable to a real model ID.")
 
     provider = _Recording(create_provider(model, api_key=resolve_api_key(model)))
-    config = provider.config_type(max_tokens=512)
+    config = create_config(model, max_tokens=512)
     system_prompt = (
         "You are a helpful assistant doing multi-step work. "
         "FIRST call TodoWrite with a 2-item list (one in_progress, one pending). "
