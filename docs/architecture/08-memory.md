@@ -22,7 +22,7 @@ Keeps typed facts (user/feedback/project/reference) long-term across session bou
 
 ## ④ Engine Integration (loop unchanged)
 
-`FridayAgent.__init__` sets up a default `FileMemoryStore` and registers `store.tools()` alongside the built-in and caller tools (`ValueError` on name collision). `step()` assembles `build_memory_section()` async once at session start (cached for the instance lifetime = session-start snapshot) and appends it after the base system prompt. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator are unchanged. `compact()` does not inject the memory section, so the index does not leak into the summary.
+`FridayAgent.__init__` sets up a default `FileMemoryStore` and registers `store.tools()` alongside the built-in and caller tools (`ValueError` on name collision). Every turn, `step()` assembles `build_memory_section()` async (rebuilt per turn, no caching) and appends it after the base system prompt. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator are unchanged. `compact()` does not inject the memory section, so the index does not leak into the summary.
 
 ## ⑤ Distributed Safety
 
@@ -30,4 +30,4 @@ Keeps typed facts (user/feedback/project/reference) long-term across session bou
 
 ## ⑥ Non-Goals
 
-Sonnet prefetch ranking · background fork extraction · team memory/secret scanning/scope tags · per-turn index refresh are excluded. `search` is not a default tool; a custom store can expose it via `tools()`.
+Sonnet prefetch ranking · background fork extraction · team memory/secret scanning/scope tags are excluded. (The index is reassembled by `build_memory_section` on every `step()` — no caching.) `search` is not a default tool; a custom store can expose it via `tools()`.

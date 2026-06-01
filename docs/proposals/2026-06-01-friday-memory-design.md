@@ -40,7 +40,7 @@ So the goal is "to layer the **essence** of CC memory (long-lived typed facts + 
 - **Background fork extraction** (CC mechanism ③) is not included. friday has no resident process — replaced by inline self-directed saving. (Can be extended later with a caller-driven extraction pass.)
 - **Team memory · scope tags · secret scanning** are out of scope. A single store is assumed; multi-tenant namespacing is left as the responsibility of the external store override.
 - **Session/checkpoint persistence** is separate from this design. The existing `LoopState` serialization (caller-owned) handles it. This design covers only the memory store.
-- **Per-turn index refresh** is not done. Since `system_prompt` is session-static, the index is a **session-start snapshot** (see §4.5 below).
+- ~~**Per-turn index refresh** is not done. The index is a **session-start snapshot**~~ → **Revised**: the index is reassembled by `build_memory_section` every turn (on `step()` entry) (cache removed; see §4.5 below).
 
 ---
 
@@ -54,7 +54,7 @@ So the goal is "to layer the **essence** of CC memory (long-lived typed facts + 
 | D4 | Index = **auto-generated from store metadata** (`load_index()`) | CC's manual 2-step save (body + index pointer) is **collapsed into 1 step**; eliminates index↔body drift |
 | D5 | Content model = **port CC's 4 types + quality guardrails** | eval-validated taxonomy (user/feedback/project/reference) + Why/How body structure + what-NOT-to-save + staleness caveat |
 | D6 | Integration = **caller-owned + pure injection** (no engine changes) | friday philosophy (just as the caller drives step/compact, the caller drives memory injection too); zero core impact when memory is not wired |
-| D7 | Injection timing = **one-time snapshot at session start (construction)** | `system_prompt` is session-static as a `FridayAgent.__init__` argument; matches the "inject at loop start" requirement |
+| D7 | Injection timing = **rebuilt every turn (on `step()` entry)** | (Revised) distributed environments rebuild the engine every turn, so a cache is never reused → per-turn assembly keeps the index fresh; also satisfies the "inject at loop start" requirement |
 
 ---
 
@@ -150,7 +150,7 @@ Rule: do not mock the DB in integration tests.
 
 ### 4.5 Recall Injection — `build_memory_section` + `system_prompt` Splicing
 
-`system_prompt` is **session-static** as a `FridayAgent.__init__` argument (`core/engine.py:49,65`). So the memory index is assembled **once at session start (agent construction)** and spliced into `system_prompt` (matches the "inject at loop start" requirement).
+`system_prompt` is **session-static** as a `FridayAgent.__init__` argument (`core/engine.py:49,65`). The memory index is assembled **every turn (on `step()` entry)** and spliced after it (also satisfies the "inject at loop start" requirement; in distributed environments the engine is rebuilt every turn, so caching is meaningless).
 
 ```python
 async def build_memory_section(store: MemoryStore) -> str:
@@ -158,7 +158,7 @@ async def build_memory_section(store: MemoryStore) -> str:
     return f"{MEMORY_INSTRUCTIONS}\n\n{render_index(index)}"
 ```
 
-Returned text structure — **static instructions first, dynamic index last** (preserves the static prefix for caching):
+Returned text structure — **static instructions first, dynamic index last**:
 
 ```
 {MEMORY_INSTRUCTIONS}                  ← static, same every session
@@ -174,7 +174,7 @@ Returned text structure — **static instructions first, dynamic index last** (p
 
 ```python
 store = FileMemoryStore("FRIDAY_MEMORY.md")
-section = await build_memory_section(store)              # once at session start
+section = await build_memory_section(store)              # every turn (on step entry)
 agent = FridayAgent(
     provider=provider,
     tools=[MemorySave(store), MemoryRead(store), MemoryDelete(store), *other_tools],
@@ -186,7 +186,7 @@ agent = FridayAgent(
 
 The engine's `assemble_system_prompt(system_prompt)` appends `GENERAL_AGENT_GUIDANCE` after it, so the final order is `base → memory section → general guidance`.
 
-> **Session-static implication**: even if the agent saves a new memory mid-session, the index reflects it only in the next session. However, the agent learns of what it just saved immediately via `tool_result`, so consistency within the current session is preserved. On distributed resume, container B reconstructs `FridayAgent` and assembles `build_memory_section` **again**, so the index freshly reflects the Store state at resume time (simpler than per-turn refresh, and fresh on every resume).
+> **Implication of per-turn rebuilding**: since `build_memory_section` is reassembled every turn (on `step()` entry), new memories the agent saves appear in the index from the next turn on (right after saving, the agent learns of them via `tool_result`). On distributed resume, container B also reassembles the section when reconstructing `FridayAgent`, so the index freshly reflects the Store state at resume time.
 
 ### 4.6 `MEMORY_INSTRUCTIONS` — Porting CC `memdir` Instructions (Collapsed to 1-Step Saving)
 
@@ -244,7 +244,7 @@ class MemorySave(Tool):
 ```
 [Session start]
   store = FileMemoryStore("FRIDAY_MEMORY.md")
-  section = build_memory_section(store)            # instructions + auto index (snapshot)
+  section = build_memory_section(store)            # instructions + auto index
   agent = FridayAgent(tools=[memory_*, ...], system_prompt = base + section)
 
 [Turn loop — caller drives via step()]
@@ -285,7 +285,6 @@ Key point: **conversation (LoopState) and long-term memory (Store) are separate 
 | Background fork extraction | friday has no resident process (D1 inline write) | Can add a caller-driven extraction pass |
 | Team memory · secret scanning · scope tags | Single store; namespacing is the store's responsibility | Handled by the external store |
 | Session/checkpoint persistence | Existing `LoopState.to_dict` mechanism (caller-owned) | Separate from the memory design |
-| Per-turn index refresh | `system_prompt` is session-static (D7) | Reassembly on each resume is sufficient |
 
 ---
 
@@ -329,7 +328,7 @@ Key point: **conversation (LoopState) and long-term memory (Store) are separate 
   - `build_memory_section`: empty store → "empty" message, per-type index lines when entries exist; static instructions come before the dynamic index.
   - `search` (default): description/name substring matching.
 - **Integration (fake provider)**
-  - Model calls `memory_save` → section appears in `FRIDAY_MEMORY.md` → index reflected in the next session's `build_memory_section`.
+  - Model calls `memory_save` → section appears in `FRIDAY_MEMORY.md` → index reflected in the next turn's/session's `build_memory_section`.
   - Model calls `memory_read` → body returned, with a caveat on stale entries.
 - **Distributed**
   - Save in session A → persisted in the Store (file/external) → reconstruct `FridayAgent` + reassemble `build_memory_section` in "container B" → index freshly reflected. Memory bodies do not leak into LoopState serialization (separation verified).

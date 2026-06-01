@@ -21,7 +21,7 @@
 - **Sonnet prefetch ranking** (CC mechanism ②) excluded. index-only injection + on-demand read is sufficient. (Future extension point: `MemoryStore.search()`.)
 - **Background fork extraction** (CC mechanism ③) excluded. friday has no resident process — replaced by inline self-directed saving.
 - **Team memory·scope tags·secret scanning** excluded. Assumes a single store; multi-tenant namespacing is the responsibility of an external store override.
-- **Per-turn index refresh** excluded. The index is a **session-start snapshot** (§5, D7).
+- ~~**Per-turn index refresh** excluded. The index is a **session-start snapshot**~~ → **Revised**: the index is reassembled every turn (on `step()` entry) by `build_memory_section` (cache removed; §5, D7).
 - **`search` is not a default tool**. The default tools are the 3 of save/read/delete. A custom store can expose search by overriding `tools()`.
 - **Session/checkpoint persistence** is separate from this design (handled by the existing `LoopState` serde).
 
@@ -40,7 +40,7 @@
 | D2 | Read = **index injection + on-demand body read** | Inherited from the proposal. |
 | D4 | Index = **auto-generated from store metadata** (`load_index()`) | Inherited from the proposal (single-step save). |
 | D5 | Content model = **CC 4 types + Why/How + what-NOT-to-save + staleness** | Inherited from the proposal. |
-| D7 | Index injection = **one-time snapshot at session start** (instance-lifetime cache) | Inherited from the proposal. `system_prompt` is session-static; fresh on every reconstruction during distributed resume. |
+| D7 | Index injection = **rebuilt every turn** (no cache) | (Revised) In a distributed environment the engine is reconstructed every turn, so a cache is never reused → assembling every turn keeps the index fresh and makes single-process behavior match distributed. |
 
 ---
 
@@ -206,7 +206,6 @@ self._tools = assembled
 self._system_prompt = system_prompt
 self._config = config
 self._max_concurrency = max_concurrency
-self._memory_section: str | None = None      # session-start snapshot cache (lazy; async, so it cannot be built in __init__)
 ```
 
 - The existing TodoWrite-only collision check (`clash`) is **generalized into a uniqueness check across all tools** (covers caller↔builtin, caller↔memory, and memory↔builtin).
@@ -215,11 +214,10 @@ self._memory_section: str | None = None      # session-start snapshot cache (laz
 
 ```python
 async def step(self, state: LoopState) -> AsyncGenerator[...]:
-    if self._memory_section is None:                                  # once (instance lifetime)
-        self._memory_section = await build_memory_section(self._memory)
+    memory_section = await build_memory_section(self._memory)         # rebuilt every turn
     effective_prompt = (
-        f"{self._system_prompt}\n\n{self._memory_section}"
-        if self._system_prompt else self._memory_section
+        f"{self._system_prompt}\n\n{memory_section}"
+        if self._system_prompt else memory_section
     )
     tool_schemas = [tool.get_tool_schema() for tool in self._tools]
     async for item in run_one_turn(
@@ -270,8 +268,8 @@ Read a memory when it is relevant or the user asks. If a memory names a file,
 function, or flag, verify it still exists before relying on it — a memory saying X
 does not guarantee X exists now. If the user says to ignore memory, act as if empty.
 
-The memory index below is a session-start snapshot; memories you save this session
-appear in your tool_result immediately but in the index only next session."""
+The memory index below is rebuilt each turn from your saved memories; a memory you
+save appears in your tool_result immediately and in the index from the next turn on."""
 
 
 def render_index(entries: list[IndexEntry]) -> str:
@@ -328,10 +326,9 @@ class MemoryDeleteInput(BaseModel):
 [Session start — FridayAgent(provider, ..., memory=None|store)]
   self._memory = store or FileMemoryStore()
   self._tools  = caller_tools + [TodoWrite()] + self._memory.tools()   # ValueError on collision
-  self._memory_section = None                                          # lazy
 
 [Turn loop — caller drives via step()]
-  step() on first call: self._memory_section = await build_memory_section(self._memory)  # snapshot
+  step() on every call: memory_section = await build_memory_section(self._memory)  # rebuilt every turn
   effective = base + memory section → run_one_turn(system_prompt=effective)
     └─ assemble_system_prompt: + GENERAL + TODO
     └─ the model sees the index
@@ -355,7 +352,7 @@ class MemoryDeleteInput(BaseModel):
 - **par-critical integrity**: memory tools go through the normal tool path (orchestrator), so zero new risk to `tool_use↔tool_result` integrity.
 - **Distributed resume**: `MemoryStore` is not serialized into `LoopState` (serde unchanged; container-local re-injection, same as provider/tools). Container B reconstructs with the store + reassembles the section → index is fresh.
 - **Compaction preservation**: even when `compact()` folds the conversation into a single summary, memory is preserved independently in the Store. Memory provides continuity across both ① in-session compaction and ② session boundaries.
-- **Implication of the session-start snapshot**: being an instance-lifetime cache, memories saved across multiple steps in the same process do not appear in that instance's index (fresh on the next reconstruction). However, the agent becomes aware immediately via `tool_result`, so in-session consistency is preserved (proposal D7).
+- **Implication of per-turn rebuild**: since the index is reassembled every turn, memories saved in the same process also appear in the index from the next turn on (single-process behaves the same as distributed). The agent also becomes aware immediately upon saving, via `tool_result` (revises proposal D7).
 - **Limits of always-on harmlessness**: memory is now always on, so it is not "a no-op if unused". However, the default `FileMemoryStore` is lazy, so **zero disk IO before use**, and an empty store injects only the "empty" index.
 
 ---
