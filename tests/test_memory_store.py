@@ -1,0 +1,77 @@
+"""Tests for friday_agent/memory/store.py — data model + InMemoryStore."""
+import pytest
+
+from friday_agent.memory.store import (
+    IndexEntry,
+    InMemoryStore,
+    MemoryEntry,
+    MemoryType,
+)
+
+
+def test_memory_type_values():
+    assert {t.value for t in MemoryType} == {"user", "feedback", "project", "reference"}
+
+
+@pytest.mark.asyncio
+async def test_inmemory_save_read_roundtrip():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="a", description="d", type=MemoryType.user, body="B"))
+    got = await store.read("a")
+    assert got is not None
+    assert got.name == "a" and got.body == "B" and got.type == MemoryType.user
+
+
+@pytest.mark.asyncio
+async def test_inmemory_read_missing_returns_none():
+    assert await InMemoryStore().read("nope") is None
+
+
+@pytest.mark.asyncio
+async def test_inmemory_upsert_by_name_updates_not_duplicates():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="a", description="d1", type=MemoryType.user, body="B1"))
+    await store.save(MemoryEntry(name="a", description="d2", type=MemoryType.user, body="B2"))
+    index = await store.load_index()
+    assert len(index) == 1
+    assert (await store.read("a")).body == "B2"
+
+
+@pytest.mark.asyncio
+async def test_inmemory_save_stamps_updated_at_when_absent():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="a", description="d", type=MemoryType.user, body="B"))
+    assert (await store.read("a")).updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_inmemory_load_index_is_metadata_only():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="a", description="desc-a", type=MemoryType.feedback, body="BODY"))
+    index = await store.load_index()
+    assert len(index) == 1
+    e = index[0]
+    assert isinstance(e, IndexEntry)
+    assert e.name == "a" and e.description == "desc-a" and e.type == MemoryType.feedback
+    assert not hasattr(e, "body")
+
+
+@pytest.mark.asyncio
+async def test_inmemory_delete_removes_entry():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="a", description="d", type=MemoryType.user, body="B"))
+    await store.delete("a")
+    assert await store.read("a") is None
+    assert await store.load_index() == []
+
+
+def test_public_reexports_available():
+    import friday_agent.memory as m
+
+    for sym in (
+        "MemoryStore", "FileMemoryStore", "InMemoryStore",
+        "MemoryEntry", "IndexEntry", "MemoryType",
+        "MemorySave", "MemoryRead", "MemoryDelete",
+        "build_memory_section",
+    ):
+        assert hasattr(m, sym), f"friday_agent.memory should re-export {sym}"

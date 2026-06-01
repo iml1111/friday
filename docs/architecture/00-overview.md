@@ -1,7 +1,7 @@
 # 00. Overview
 
 Entry-point document for grasping the whole architecture of the `friday_agent/` package at a glance.  
-Detailed implementation is covered in the numbered sub-documents (01–06).
+Detailed implementation is covered in the numbered sub-documents (01–08).
 
 ---
 
@@ -53,12 +53,13 @@ Emitting the serializable `LoopState` as-is at each turn boundary supports **sta
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (cross-cutting) | par-critical invariants | [06-invariants](06-invariants.md) |
 | (cross-cutting) | catalog of all data models | [07-data-models](07-data-models.md) |
+| `memory/` | `store.py`·`tool.py`·`prompt.py` — persistent memory subsystem. always-on built-in, replaced via `MemoryStore` injection | [08-memory](08-memory.md) |
 
 ---
 
 ## Reading Order
 
-00 → 01 → 02 → 03 → 04 → 05 → 06 (→ 07 for reference)
+00 → 01 → 02 → 03 → 04 → 05 → 06 (→ 07 for reference) (→ 08 memory)
 
 | Order | Doc | Key Content |
 |---|---|---|
@@ -70,6 +71,7 @@ Emitting the serializable `LoopState` as-is at each turn boundary supports **sta
 | 05 | [05-messages](05-messages.md) | Message union type · `normalize_for_api()` |
 | 06 | [06-invariants](06-invariants.md) | par-critical invariants · `tool_use`↔`tool_result` integrity |
 | 07 | [07-data-models](07-data-models.md) | Catalog of all data model fields · serialization boundaries (reference) |
+| 08 | [08-memory](08-memory.md) | Persistent memory subsystem · `MemoryStore` replacement seam · distributed safety |
 
 ---
 

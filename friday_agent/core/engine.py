@@ -12,6 +12,8 @@ from typing import AsyncGenerator
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
+from friday_agent.memory.prompt import build_memory_section
+from friday_agent.memory.store import FileMemoryStore, MemoryStore
 from friday_agent.core.loop import run_one_turn
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
@@ -50,6 +52,7 @@ class FridayAgent:
         system_prompt: str = "",
         config: LLMConfig | None = None,
         max_concurrency: int = 10,
+        memory: MemoryStore | None = None,
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -61,20 +64,27 @@ class FridayAgent:
                 f"{type(config).__name__}. Match the config type to the model vendor."
             )
 
+        self._memory = memory if memory is not None else FileMemoryStore()
         caller_tools = tools if tools is not None else []
-        builtins = builtin_tools()
-        builtin_names = {t.name for t in builtins}
-        clash = sorted({t.name for t in caller_tools if t.name in builtin_names})
-        if clash:
+        assembled = [*caller_tools, *builtin_tools(), *self._memory.tools()]
+        seen: set[str] = set()
+        dups: list[str] = []
+        for t in assembled:
+            if t.name in seen:
+                dups.append(t.name)
+            seen.add(t.name)
+        if dups:
             raise ValueError(
-                f"FridayAgent: {clash} are built-in tools that are always registered; "
-                f"remove them from the tools list."
+                f"FridayAgent: duplicate tool names {sorted(set(dups))}. TodoWrite and the "
+                f"active MemoryStore's tools are SDK-managed and always registered; remove "
+                f"the colliding tool(s) or override the store's tools()."
             )
         self._provider = provider
-        self._tools = [*caller_tools, *builtins]
+        self._tools = assembled
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
+        self._memory_section: str | None = None
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -93,13 +103,22 @@ class FridayAgent:
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
+        # Built once per instance (session-start snapshot) and cached. Callers drive
+        # step() sequentially, so this first-build check needs no lock.
+        if self._memory_section is None:
+            self._memory_section = await build_memory_section(self._memory)
+        effective_prompt = (
+            f"{self._system_prompt}\n\n{self._memory_section}"
+            if self._system_prompt
+            else self._memory_section
+        )
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(
             provider=self._provider,
             tools=self._tools,
             tool_schemas=tool_schemas,
             state=state,
-            system_prompt=self._system_prompt,
+            system_prompt=effective_prompt,
             config=self._config,
             max_concurrency=self._max_concurrency,
         ):
