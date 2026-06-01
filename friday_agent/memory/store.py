@@ -222,6 +222,11 @@ Save when you learn a durable fact in one of the four types. For feedback/projec
 structure the body as the rule/fact, then **Why:** and **How to apply:** lines.
 Reuse an existing name to UPDATE rather than duplicate.
 
+## When to correct
+If a saved memory becomes wrong or outdated, fix it the moment you notice — re-save
+with the same name to UPDATE it, or use memory_delete to remove it. Never leave a
+known-false memory in place.
+
 ## What NOT to save
 Do not save what is derivable (code structure, architecture, git history), one-off
 debugging fixes, or ephemeral conversation/run state.
@@ -229,7 +234,8 @@ debugging fixes, or ephemeral conversation/run state.
 ## When to access
 Read a memory when it is relevant or the user asks. If a memory names a file,
 function, or flag, verify it still exists before relying on it — a memory saying X
-does not guarantee X exists now. If the user says to ignore memory, act as if empty.
+does not guarantee X exists now (if it no longer holds, correct it per "When to
+correct"). If the user says to ignore memory, act as if empty.
 
 The memory index below is rebuilt each turn from your saved memories; a memory you
 save appears in your tool_result immediately and in the index from the next turn on."""
