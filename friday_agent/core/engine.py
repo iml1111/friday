@@ -8,6 +8,7 @@ drives the turn loop by calling step() until the sentinel is a Terminal.
 """
 from __future__ import annotations
 
+from collections import Counter
 from typing import AsyncGenerator
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
@@ -67,15 +68,10 @@ class FridayAgent:
         self._memory = memory if memory is not None else FileMemoryStore()
         caller_tools = tools if tools is not None else []
         assembled = [*caller_tools, *builtin_tools(), *self._memory.tools()]
-        seen: set[str] = set()
-        dups: list[str] = []
-        for t in assembled:
-            if t.name in seen:
-                dups.append(t.name)
-            seen.add(t.name)
+        dups = sorted(n for n, c in Counter(t.name for t in assembled).items() if c > 1)
         if dups:
             raise ValueError(
-                f"FridayAgent: duplicate tool names {sorted(set(dups))}. TodoWrite and the "
+                f"FridayAgent: duplicate tool names {dups}. TodoWrite and the "
                 f"active MemoryStore's tools are SDK-managed and always registered; remove "
                 f"the colliding tool(s) or override the store's tools()."
             )
