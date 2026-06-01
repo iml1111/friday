@@ -1,10 +1,9 @@
-"""Memory data model, MemoryStore ABC, store backends, and prompt-section assembly.
+"""Memory data model, MemoryStore ABC, FileMemoryStore backend, and prompt-section assembly.
 
-MemoryStore is the persistence interface for agent memory; InMemoryStore is a
-dict-backed implementation (test double / single-process option) and FileMemoryStore
-is the default single-file Markdown backend. This module also assembles the memory
+MemoryStore is the persistence interface for agent memory; FileMemoryStore is the
+default single-file Markdown backend. This module also assembles the memory
 system-prompt section (static instructions + auto-generated index) the engine
-prepends each turn: MEMORY_INSTRUCTIONS, render_index, build_memory_section.
+prepends each turn: MEMORY_INSTRUCTIONS, build_memory_section.
 """
 from __future__ import annotations
 
@@ -78,103 +77,6 @@ class MemoryStore(ABC):
         return [MemorySave(self), MemoryRead(self), MemoryDelete(self)]
 
 
-class InMemoryStore(MemoryStore):
-    """Dict-backed store: test double + single-process, non-persistent option."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, MemoryEntry] = {}
-
-    async def save(self, entry: MemoryEntry) -> None:
-        if entry.updated_at is None:
-            entry = replace(entry, updated_at=time.time())
-        self._data[entry.name] = entry
-
-    async def read(self, name: str) -> MemoryEntry | None:
-        return self._data.get(name)
-
-    async def delete(self, name: str) -> None:
-        self._data.pop(name, None)
-
-    async def load_index(self) -> list[IndexEntry]:
-        return [
-            IndexEntry(name=e.name, description=e.description, type=e.type, updated_at=e.updated_at)
-            for e in self._data.values()
-        ]
-
-
-_FILE_HEADER = (
-    "# FRIDAY_MEMORY.md\n"
-    "<!-- Friday agent memory. Auto-managed; safe to read/edit by hand. -->\n"
-)
-_ENTRY_RE = re.compile(r"^##\s+\[(?P<type>\w+)\]\s+(?P<name>.+?)\s*$")
-
-
-def _iso(ts: float | None) -> str | None:
-    return None if ts is None else datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
-
-
-def _from_iso(s: str) -> float:
-    return datetime.fromisoformat(s).timestamp()
-
-
-def _serialize_entries(entries: list[MemoryEntry]) -> str:
-    out = [_FILE_HEADER]
-    for e in entries:
-        out.append("")
-        out.append(f"## [{e.type.value}] {e.name}")
-        out.append(f"description: {e.description}")
-        iso = _iso(e.updated_at)
-        if iso:
-            out.append(f"updated: {iso}")
-        out.append("---")
-        out.append(e.body.rstrip("\n"))
-    return "\n".join(out) + "\n"
-
-
-def _parse_entries(text: str) -> list[MemoryEntry]:
-    lines = text.splitlines()
-    entries: list[MemoryEntry] = []
-    i, n = 0, len(lines)
-    while i < n:
-        header = _ENTRY_RE.match(lines[i])
-        if not header:
-            i += 1
-            continue
-        etype, name = header.group("type"), header.group("name")
-        i += 1
-        description, updated_at = "", None
-        while i < n and lines[i].strip() != "---" and not _ENTRY_RE.match(lines[i]):
-            line = lines[i]
-            if line.startswith("description:"):
-                description = line[len("description:"):].strip()
-            elif line.startswith("updated:"):
-                try:
-                    updated_at = _from_iso(line[len("updated:"):].strip())
-                except ValueError:
-                    updated_at = None
-            i += 1
-        if i < n and lines[i].strip() == "---":
-            i += 1
-        body_lines: list[str] = []
-        while i < n and not _ENTRY_RE.match(lines[i]):
-            body_lines.append(lines[i])
-            i += 1
-        try:
-            mtype = MemoryType(etype)
-        except ValueError:
-            continue   # unknown type (e.g. hand-edit typo) — skip rather than crash
-        entries.append(
-            MemoryEntry(
-                name=name,
-                description=description,
-                type=mtype,
-                body="\n".join(body_lines).strip("\n"),
-                updated_at=updated_at,
-            )
-        )
-    return entries
-
-
 class FileMemoryStore(MemoryStore):
     """Default backend: a single human-readable Markdown file of memory sections.
 
@@ -184,16 +86,14 @@ class FileMemoryStore(MemoryStore):
     Body text must not contain a line matching the entry header pattern '## [type] name'.
     """
 
+    _HEADER = (
+        "# FRIDAY_MEMORY.md\n"
+        "<!-- Friday agent memory. Auto-managed; safe to read/edit by hand. -->\n"
+    )
+    _ENTRY_RE = re.compile(r"^##\s+\[(?P<type>\w+)\]\s+(?P<name>.+?)\s*$")
+
     def __init__(self, path: str = "FRIDAY_MEMORY.md") -> None:
         self._path = Path(path)
-
-    def _read_all(self) -> list[MemoryEntry]:
-        if not self._path.exists():
-            return []
-        return _parse_entries(self._path.read_text(encoding="utf-8"))
-
-    def _write_all(self, entries: list[MemoryEntry]) -> None:
-        self._path.write_text(_serialize_entries(entries), encoding="utf-8")
 
     async def save(self, entry: MemoryEntry) -> None:
         if entry.updated_at is None:
@@ -224,6 +124,82 @@ class FileMemoryStore(MemoryStore):
             IndexEntry(name=e.name, description=e.description, type=e.type, updated_at=e.updated_at)
             for e in self._read_all()
         ]
+
+    # ── Markdown serialization (this backend's on-disk format) ──────────────────
+
+    def _read_all(self) -> list[MemoryEntry]:
+        if not self._path.exists():
+            return []
+        return self._parse(self._path.read_text(encoding="utf-8"))
+
+    def _write_all(self, entries: list[MemoryEntry]) -> None:
+        self._path.write_text(self._serialize(entries), encoding="utf-8")
+
+    @staticmethod
+    def _iso(ts: float | None) -> str | None:
+        return None if ts is None else datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _from_iso(s: str) -> float:
+        return datetime.fromisoformat(s).timestamp()
+
+    @classmethod
+    def _serialize(cls, entries: list[MemoryEntry]) -> str:
+        out = [cls._HEADER]
+        for e in entries:
+            out.append("")
+            out.append(f"## [{e.type.value}] {e.name}")
+            out.append(f"description: {e.description}")
+            iso = cls._iso(e.updated_at)
+            if iso:
+                out.append(f"updated: {iso}")
+            out.append("---")
+            out.append(e.body.rstrip("\n"))
+        return "\n".join(out) + "\n"
+
+    @classmethod
+    def _parse(cls, text: str) -> list[MemoryEntry]:
+        lines = text.splitlines()
+        entries: list[MemoryEntry] = []
+        i, n = 0, len(lines)
+        while i < n:
+            header = cls._ENTRY_RE.match(lines[i])
+            if not header:
+                i += 1
+                continue
+            etype, name = header.group("type"), header.group("name")
+            i += 1
+            description, updated_at = "", None
+            while i < n and lines[i].strip() != "---" and not cls._ENTRY_RE.match(lines[i]):
+                line = lines[i]
+                if line.startswith("description:"):
+                    description = line[len("description:"):].strip()
+                elif line.startswith("updated:"):
+                    try:
+                        updated_at = cls._from_iso(line[len("updated:"):].strip())
+                    except ValueError:
+                        updated_at = None
+                i += 1
+            if i < n and lines[i].strip() == "---":
+                i += 1
+            body_lines: list[str] = []
+            while i < n and not cls._ENTRY_RE.match(lines[i]):
+                body_lines.append(lines[i])
+                i += 1
+            try:
+                mtype = MemoryType(etype)
+            except ValueError:
+                continue   # unknown type (e.g. hand-edit typo) — skip rather than crash
+            entries.append(
+                MemoryEntry(
+                    name=name,
+                    description=description,
+                    type=mtype,
+                    body="\n".join(body_lines).strip("\n"),
+                    updated_at=updated_at,
+                )
+            )
+        return entries
 
 
 # --- System-prompt section assembly --------------------------------------------
@@ -259,19 +235,16 @@ The memory index below is rebuilt each turn from your saved memories; a memory y
 save appears in your tool_result immediately and in the index from the next turn on."""
 
 
-def render_index(entries: list[IndexEntry]) -> str:
-    """Render the metadata index as injectable text."""
-    if not entries:
-        return (
+async def build_memory_section(store: MemoryStore) -> str:
+    """Assemble the always-injected memory section: instructions then live index."""
+    entries = await store.load_index()
+    if entries:
+        lines = "\n".join(f"- [{e.type.value}] {e.name} — {e.description}" for e in entries)
+        index = f"## Current memory index\n{lines}"
+    else:
+        index = (
             "## Current memory index\n"
             "Your memory is empty. Save memories as you learn about the user, "
             "their feedback, and the project."
         )
-    lines = "\n".join(f"- [{e.type.value}] {e.name} — {e.description}" for e in entries)
-    return f"## Current memory index\n{lines}"
-
-
-async def build_memory_section(store: MemoryStore) -> str:
-    """Assemble the always-injected memory section: instructions then live index."""
-    index = await store.load_index()
-    return f"{MEMORY_INSTRUCTIONS}\n\n{render_index(index)}"
+    return f"{MEMORY_INSTRUCTIONS}\n\n{index}"

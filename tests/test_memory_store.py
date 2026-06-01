@@ -1,15 +1,14 @@
-"""Tests for friday_agent/memory/store.py — data model + InMemoryStore + prompt-section assembly."""
+"""Tests for friday_agent/memory/store.py — data model + prompt-section assembly."""
 import pytest
 
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     IndexEntry,
-    InMemoryStore,
     MemoryEntry,
     MemoryType,
     build_memory_section,
-    render_index,
 )
+from tests.fakes import InMemoryStore
 
 
 def test_memory_type_values():
@@ -72,7 +71,7 @@ def test_public_reexports_available():
     import friday_agent.memory as m
 
     for sym in (
-        "MemoryStore", "FileMemoryStore", "InMemoryStore",
+        "MemoryStore", "FileMemoryStore",
         "MemoryEntry", "IndexEntry", "MemoryType",
         "MemorySave", "MemoryRead", "MemoryDelete",
         "build_memory_section",
@@ -82,17 +81,12 @@ def test_public_reexports_available():
 
 # --- Prompt-section assembly (MEMORY_INSTRUCTIONS + auto index) -----------------
 
-def test_render_index_empty_says_empty():
-    out = render_index([])
-    assert "empty" in out.lower()
-
-
-def test_render_index_lists_type_name_description():
-    entries = [
-        IndexEntry(name="user-role", description="backend eng", type=MemoryType.user),
-        IndexEntry(name="testing-policy", description="real DB", type=MemoryType.feedback),
-    ]
-    out = render_index(entries)
+@pytest.mark.asyncio
+async def test_build_section_lists_each_entry_as_type_name_description():
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="user-role", description="backend eng", type=MemoryType.user, body="B"))
+    await store.save(MemoryEntry(name="testing-policy", description="real DB", type=MemoryType.feedback, body="B"))
+    out = await build_memory_section(store)
     assert "[user] user-role — backend eng" in out
     assert "[feedback] testing-policy — real DB" in out
 

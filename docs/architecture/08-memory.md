@@ -12,7 +12,7 @@
 
 | 경로 | 책임 | 핵심 심볼 |
 |---|---|---|
-| `friday_agent/memory/store.py` | 영속 + 도구 표면 인터페이스, 기본/메모리 백엔드, 프롬프트 섹션 조립(지침 + 자동 인덱스) | `MemoryStore`, `FileMemoryStore`, `InMemoryStore`, `MemoryEntry`, `IndexEntry`, `MemoryType`, `MEMORY_INSTRUCTIONS`, `build_memory_section`, `render_index` |
+| `friday_agent/memory/store.py` | 영속 + 도구 표면 인터페이스, 기본 파일 백엔드, 프롬프트 섹션 조립(지침 + 자동 인덱스) | `MemoryStore`, `FileMemoryStore`, `MemoryEntry`, `IndexEntry`, `MemoryType`, `MEMORY_INSTRUCTIONS`, `build_memory_section` |
 | `friday_agent/memory/tool.py` | 에이전트 표면(저장/읽기/삭제) | `MemorySave`, `MemoryRead`, `MemoryDelete` |
 
 ## ③ 단일 주입 seam — `MemoryStore`

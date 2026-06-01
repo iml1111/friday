@@ -12,14 +12,40 @@ Design:
 - received_system_prompts: system_prompt passed to each complete() call.
 - received_tools: tools passed to each complete() call.
 """
+import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Union
 
 from friday_agent.api.provider import (
     AssistantResponse,
     LLMProvider,
 )
+from friday_agent.memory.store import IndexEntry, MemoryEntry, MemoryStore
+
+
+class InMemoryStore(MemoryStore):
+    """Dict-backed MemoryStore test double: non-persistent, no file I/O."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, MemoryEntry] = {}
+
+    async def save(self, entry: MemoryEntry) -> None:
+        if entry.updated_at is None:
+            entry = replace(entry, updated_at=time.time())
+        self._data[entry.name] = entry
+
+    async def read(self, name: str) -> MemoryEntry | None:
+        return self._data.get(name)
+
+    async def delete(self, name: str) -> None:
+        self._data.pop(name, None)
+
+    async def load_index(self) -> list[IndexEntry]:
+        return [
+            IndexEntry(name=e.name, description=e.description, type=e.type, updated_at=e.updated_at)
+            for e in self._data.values()
+        ]
 
 
 @dataclass
