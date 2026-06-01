@@ -128,7 +128,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 | `friday_agent/api/provider.py` | `LLMProvider`, `LLMError`, `ContextOverflowError`, response block types |
 | `friday_agent/context/compact.py` | `compact_conversation()`, `create_compact_summary_message()` — implementation of `engine.compact()` |
 | `friday_agent/api/prompts.py` | `assemble_system_prompt()` — system prompt assembly + general behavior block injection |
-| `friday_agent/memory/prompt.py` · `memory/store.py` | `build_memory_section()` — per-turn memory section assembly for `engine.step()`; default `FileMemoryStore`/`MemoryStore` types |
+| `friday_agent/memory/store.py` | `build_memory_section()` — per-turn memory section assembly for `engine.step()`; default `FileMemoryStore`/`MemoryStore` types |
 
 ---
 

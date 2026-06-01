@@ -55,7 +55,7 @@ In addition, `FridayAgent` always registers and injects **TodoWrite (todo tracki
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (cross-cutting) | par-critical invariants | [06-invariants](06-invariants.md) |
 | (cross-cutting) | catalog of all data models | [07-data-models](07-data-models.md) |
-| `memory/` | `store.py`·`tool.py`·`prompt.py` — persistent memory subsystem. always-on built-in, replaced via `MemoryStore` injection | [08-memory](08-memory.md) |
+| `memory/` | `store.py`·`tool.py` — persistent memory subsystem. always-on built-in, replaced via `MemoryStore` injection | [08-memory](08-memory.md) |
 
 ---
 

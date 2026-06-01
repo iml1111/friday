@@ -12,9 +12,8 @@ Keeps typed facts (user/feedback/project/reference) long-term across session bou
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/memory/store.py` | Persistence + tool-surface interface, default/in-memory backends | `MemoryStore`, `FileMemoryStore`, `InMemoryStore`, `MemoryEntry`, `IndexEntry`, `MemoryType` |
+| `friday_agent/memory/store.py` | Persistence + tool-surface interface, default/in-memory backends, prompt section assembly (instructions + auto index) | `MemoryStore`, `FileMemoryStore`, `InMemoryStore`, `MemoryEntry`, `IndexEntry`, `MemoryType`, `MEMORY_INSTRUCTIONS`, `build_memory_section`, `render_index` |
 | `friday_agent/memory/tool.py` | Agent surface (save/read/delete) | `MemorySave`, `MemoryRead`, `MemoryDelete` |
-| `friday_agent/memory/prompt.py` | Instructions + auto-index injection text | `MEMORY_INSTRUCTIONS`, `build_memory_section`, `render_index` |
 
 ## ③ Single Injection Seam — `MemoryStore`
 

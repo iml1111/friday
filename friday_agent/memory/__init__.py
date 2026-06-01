@@ -6,14 +6,16 @@ caller injects their own MemoryStore.
 """
 from __future__ import annotations
 
-from friday_agent.memory.prompt import MEMORY_INSTRUCTIONS, build_memory_section, render_index
 from friday_agent.memory.store import (
+    MEMORY_INSTRUCTIONS,
     FileMemoryStore,
     IndexEntry,
     InMemoryStore,
     MemoryEntry,
     MemoryStore,
     MemoryType,
+    build_memory_section,
+    render_index,
 )
 from friday_agent.memory.tool import MemoryDelete, MemoryRead, MemorySave
 

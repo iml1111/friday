@@ -86,7 +86,7 @@ The code was implemented in Phase order (each Phase verified independently):
 - **Phase 2 — Tool orchestration**: partitioning + parallel execution (`asyncio.gather` + `Semaphore`) + block order preservation. `tools/orchestrator.py`.
 - **Phase 3 — Context management**: external compact + overflow propagation (caller-driven). When `step()` raises `ContextOverflowError`, the caller shrinks the context with `engine.compact(state)` and retries. `context/compact.py` (summarization only), `messages/normalize.py`. For compaction behavior details, see `docs/architecture/04-context-compaction.md`.
 
-Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `context/`(compact — summarization only, no recovery.py) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool·prompt). For per-file responsibilities, see `docs/architecture/00-overview.md#module-map`.
+Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `context/`(compact — summarization only, no recovery.py) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool). For per-file responsibilities, see `docs/architecture/00-overview.md#module-map`.
 
 ## Target Stack & Verification
 
