@@ -89,9 +89,8 @@ def _render_todos(todos: list[dict]) -> None:
 
 
 async def main() -> int:
-    provider = create_provider(_MODEL, api_key=resolve_api_key(_MODEL))
     engine = FridayAgent(
-        provider=provider,
+        provider=create_provider(_MODEL, api_key=resolve_api_key(_MODEL)),
         tools=[ExampleTool()],   # TodoWrite is auto-registered by FridayAgent (built-in)
         system_prompt=_SYSTEM_PROMPT,
         config=create_config(_MODEL, max_tokens=_MAX_TOKENS),
