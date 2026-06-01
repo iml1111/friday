@@ -37,8 +37,7 @@ run_one_turn() 한 번
 구조 상세(읽는 순서·핵심 데이터 구조·불변식·모듈 지도)는 [docs/architecture/](docs/architecture/00-overview.md) 참조.
 
 상세 함정 목록은 `CLAUDE.md`(구현 시 핵심 함정)와 [docs/architecture/06-invariants.md](docs/architecture/06-invariants.md)를 참고하세요.
-LLM 백엔드 교체는 아래 [다른 LLM 백엔드로 교체하기](#다른-llm-백엔드로-교체하기),
-도구 추가는 [직접 도구 만들기 (BYO Tool)](#직접-도구-만들기-byo-tool)를 보세요.
+도구 추가·LLM 교체·메모리 백엔드 교체는 [확장 가이드](#확장-가이드-인터페이스-주입으로-커스터마이징)를 보세요.
 
 ---
 
@@ -182,22 +181,21 @@ pytest -v
 
 세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)와 도구 `memory_save`/`memory_read`/`memory_delete`가 항상 등록되고, 메모리 지침 + 자동 인덱스가 `step()`에서 매 턴 재조립돼 시스템 프롬프트에 주입된다(캐시 없음 — 분산 재개 시 인덱스가 재개 시점 store 상태를 fresh 반영).
 
-`MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**하므로, 자신의 store를 주입하면 기본 store와 도구가 통째로 대체된다:
-
-```python
-from friday_agent.memory.store import FileMemoryStore
-from friday_agent.core.engine import FridayAgent
-
-engine = FridayAgent(provider=provider, memory=FileMemoryStore("mem.md"))
-# 백엔드만 바꾸려면 MemoryStore의 save/read/delete/load_index만 구현(기본 tools() 상속);
-# 도구 표면까지 바꾸려면 tools()를 오버라이드.
-```
-
-기본 `FileMemoryStore`는 단일 프로세스/로컬 편의다 — 분산/클라우드 영속은 외부 Storage 기반 `MemoryStore`를 주입한다(provider·tools와 동일하게 컨테이너-로컬 재주입). 상세는 [08-memory](docs/architecture/08-memory.md) 참조.
+자신의 백엔드(외부 Storage·DB 등)로 store를 교체하는 방법은 [확장 가이드 — ③ 메모리 백엔드](#확장-가이드-인터페이스-주입으로-커스터마이징) 참조.
 
 ---
 
-## 직접 도구 만들기 (BYO Tool)
+## 확장 가이드: 인터페이스 주입으로 커스터마이징
+
+`FridayAgent`는 코어 루프(`run_one_turn`)를 건드리지 않고 교체 가능한 **3개 주입 seam**을 가진다 — 도구·LLM·메모리. 각 seam은 정해진 인터페이스만 구현하면 된다. 공통 규칙: **생성자에서 주입** · 도구 이름이 겹치면 `FridayAgent.__init__`이 `ValueError` · `provider`/`memory`는 `LoopState`에 직렬화되지 않고 컨테이너-로컬로 재주입된다.
+
+| seam | 구현 인터페이스 | 위치 | 주입 |
+|---|---|---|---|
+| 도구 | `Tool` 상속 | `friday_agent/tools/base.py` | `FridayAgent(tools=[...])` |
+| LLM | `LLMProvider` 상속 | `friday_agent/api/provider.py` | `FridayAgent(provider=...)` |
+| 메모리 | `MemoryStore` 상속 | `friday_agent/memory/store.py` | `FridayAgent(memory=...)` |
+
+### ① 도구 (Tool)
 
 `ExampleTool`(`friday_agent/tools/builtin/example_tool.py`)이 도구 작성 패턴의 예시입니다.
 `Tool`을 상속하고 입력 스키마와 `call()`만 구현하면 됩니다.
@@ -233,7 +231,7 @@ class WeatherTool(Tool):
 
 > `TodoWrite`와 메모리 도구(`memory_save`/`memory_read`/`memory_delete`)는 빌트인이라 `tools=`에 직접 넣지 마세요 — 이름이 겹치면 `FridayAgent.__init__`이 `ValueError`로 거부합니다([빌트인 능력](#빌트인-능력-always-on) 참조).
 
-### LLM은 도구를 어떻게 인지하는가
+#### LLM은 도구를 어떻게 인지하는가
 
 모델이 "이 도구가 무엇이고 어떻게 호출하는지" 판단하는 근거는 전부 `Tool.get_tool_schema()`
 (`friday_agent/tools/base.py`)가 만드는 **3개 키**로 환원됩니다. 위 `WeatherTool`이 실제로
@@ -264,7 +262,7 @@ class WeatherTool(Tool):
 > 정적 docstring 대신 입력에 따라 설명을 동적으로 바꾸려면 `description()` 메서드를 오버라이드합니다(기본값이 docstring).
 > 최상위 `title`은 제거되고 `$defs`는 인라인 전개된 뒤 제거됩니다(중첩 모델·enum이 `$ref` 없이 그대로 노출 — 예: `status` enum 값들이 스키마에 직접 보임). 위처럼 **필드별 `title`은 남습니다** — 정상입니다.
 
-### 실행 정책 메서드는 LLM에 전달되지 않는다
+#### 실행 정책 메서드는 LLM에 전달되지 않는다
 
 `is_concurrency_safe`는 스키마에
 **포함되지 않습니다.** 모델 인지용이 아니라 **오케스트레이터가 실행을 제어**하는 런타임 신호입니다:
@@ -272,6 +270,80 @@ class WeatherTool(Tool):
 > `is_concurrency_safe()`가 `True`인 도구만 병렬 배치로 실행됩니다 (읽기 전용 도구가 대표적인 예).
 > 외부 상태를 바꾸는(mutating) 도구는 `is_concurrency_safe()`를 `False`로 반환해 순차 실행됩니다.
 > 도구 파티셔닝 상세는 [02-tool-orchestration](docs/architecture/02-tool-orchestration.md) 참조.
+
+### ② LLM 백엔드 (LLMProvider)
+
+LLM 교체는 **`LLMProvider`** 하나만 구현하면 됩니다(`friday_agent/api/provider.py`). `config_type`(설정 클래스)을 등록하고 `complete()`가 벤더 응답을 `AssistantResponse`로 **정규화**하면 코어 루프 무변경으로 다른 백엔드가 동작합니다.
+
+```python
+from dataclasses import dataclass
+from friday_agent.api.provider import (
+    LLMProvider, AssistantResponse, StopReason,
+    TextBlock, ToolUseBlock, TokenUsage, ContextOverflowError,
+)
+
+
+@dataclass
+class MyConfig:                       # 최소 필드 — max_tokens, temperature (LLMConfig 프로토콜)
+    max_tokens: int = 16384
+    temperature: float | None = None
+
+
+class MyProvider(LLMProvider[MyConfig]):
+    config_type = MyConfig            # ← 필수: 기본 config 생성·검증에 사용
+
+    async def complete(self, messages, system_prompt, tools, config) -> AssistantResponse:
+        resp = await call_my_backend(messages, system_prompt, tools, config)   # 벤더 호출
+        # 벤더 응답 → AssistantResponse 정규화
+        return AssistantResponse(
+            content=[TextBlock(text=resp.text)],     # 또는 ToolUseBlock(id, name, input=<dict>)
+            stop_reason=StopReason.END_TURN,         # TOOL_USE / MAX_TOKENS / END_TURN
+            usage=TokenUsage(input_tokens=resp.in_, output_tokens=resp.out),
+        )
+        # 컨텍스트 초과면 ContextOverflowError raise → 호출자가 engine.compact(state) 후 재시도
+```
+
+구현 규약:
+
+- **`config_type` 설정** + **`complete()` 구현**이 전부의 핵심. 응답은 항상 `AssistantResponse(content, stop_reason, usage, id="", model="")`로 정규화.
+- **content 블록**: `TextBlock(text)` · `ToolUseBlock(id, name, input=<이미 파싱된 dict>)` · `ThinkingBlock`(일부 백엔드). `tool_use.input`은 문자열이 아니라 dict여야 함.
+- **`stop_reason`**: `END_TURN` / `TOOL_USE` / `MAX_TOKENS` / `CONTEXT_WINDOW_EXCEEDED`. 매핑 없는 벤더 값은 `END_TURN`으로.
+- **예외 매핑**: 벤더 예외를 5-클래스 계층(`LLMError`·`RateLimitError`·`ContextOverflowError`·`AuthError`·`TransientError`)으로. 컨텍스트 초과는 `ContextOverflowError`로 **전파**(루프가 잡지 않고 호출자가 `compact`).
+- **벤더 규칙은 어댑터 책임**: 빈 `tools`는 API 필드 자체 생략, thinking 활성 시 `temperature` 미전송 등.
+
+벤더 차이표·정규화 세부는 [03-llm-providers](docs/architecture/03-llm-providers.md) 참조.
+
+### ③ 메모리 백엔드 (MemoryStore)
+
+`MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**합니다. 자신의 store를 주입하면 기본 `FileMemoryStore`와 그 도구가 통째로 대체됩니다.
+
+```python
+from friday_agent.memory.store import MemoryStore, MemoryEntry, IndexEntry
+from friday_agent.core.engine import FridayAgent
+
+
+class RedisMemoryStore(MemoryStore):
+    async def save(self, entry: MemoryEntry) -> None: ...       # name으로 upsert(같은 name이면 갱신)
+    async def read(self, name: str) -> MemoryEntry | None: ...  # 전체 엔트리(body 포함) 또는 None
+    async def delete(self, name: str) -> None: ...              # 없으면 무시
+    async def load_index(self) -> list[IndexEntry]:             # body 없는 메타데이터만(인덱스 주입용)
+        ...
+    # tools()는 기본 상속 시 memory_save/read/delete 그대로.
+    # 도구 표면을 바꾸려면(예: search 추가) 오버라이드:
+    #   def tools(self): return [MemorySave(self), MemoryRead(self), MySearchTool(self)]
+
+
+engine = FridayAgent(provider=provider, memory=RedisMemoryStore())   # store+도구 통째 대체
+```
+
+구현 규약:
+
+- **4개 async 메서드 구현**: `save`(upsert) · `read` · `delete`(없으면 무시) · `load_index`(body 없는 메타만).
+- **데이터 모델**: `MemoryEntry(name, description, type: MemoryType, body, updated_at)` · `IndexEntry`(body 없음) · `MemoryType` = `user`/`feedback`/`project`/`reference`.
+- **`tools()`** 기본값 = `memory_save`/`memory_read`/`memory_delete` 래퍼. 오버라이드하면 도구 표면이 통째로 바뀝니다.
+- 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)는 단일 프로세스/로컬 편의 — 분산/클라우드 영속은 외부 Storage 기반 store를 주입합니다(`provider`와 동일하게 컨테이너-로컬 재주입, `LoopState`에 미직렬화).
+
+상세는 [08-memory](docs/architecture/08-memory.md) 참조.
 
 ---
 
@@ -306,16 +378,6 @@ async for item in engine.step(state):           # 다음 턴 … Terminal까지 
 ```
 
 루프 상태는 항상 깨끗한 턴 경계에서만 업데이트되므로(`tool_use`↔`tool_result` 정합 보존) `LoopState`를 그대로 직렬화·재개할 수 있습니다. 설계 상세는 [01-core-loop](docs/architecture/01-core-loop.md) 참조.
-
-## 다른 LLM 백엔드로 교체하기
-
-LLM 교체는 **`LLMProvider`** 한 인터페이스만 구현하면 됩니다(`friday_agent/api/provider.py`).
-`complete()`가 LLM 응답을 `AssistantResponse`로 정규화하면 코어 루프 코드를 바꾸지 않고 다른 백엔드로 동작합니다.
-추상화 경계 상세는 [03-llm-providers](docs/architecture/03-llm-providers.md) 참조.
-
-> 주입 가능한 seam은 LLM(`LLMProvider`) 외에 **메모리(`MemoryStore`)**도 있습니다 — 영속 백엔드와 그 도구를 함께 교체합니다(`FridayAgent(..., memory=...)`). 상세는 [08-memory](docs/architecture/08-memory.md) 참조.
-
----
 
 ## 더 읽을거리
 
