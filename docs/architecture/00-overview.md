@@ -40,6 +40,8 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 
 턴 경계에서 직렬화 가능한 `LoopState`를 그대로 방출해 **stateless 분산 재개**를 지원한다.
 
+또한 `FridayAgent`는 **TodoWrite(todo 추적)**와 **메모리(`MemoryStore`)**를 호출자 배선 없이 항상 빌트인으로 등록·주입한다 — 상세는 [02-tool-orchestration](02-tool-orchestration.md)·[08-memory](08-memory.md) 참조.
+
 ---
 
 ## 모듈 지도
@@ -47,7 +49,7 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | 서브시스템 | 파일 | 문서 |
 |---|---|---|
 | `core/` | `loop.py`·`engine.py`·`state.py` | [01-core-loop](01-core-loop.md) |
-| `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py` | [02-tool-orchestration](02-tool-orchestration.md) |
+| `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py`·`builtin/todo_write.py` | [02-tool-orchestration](02-tool-orchestration.md) |
 | `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) |
 | `context/` | `compact.py` | [04-context-compaction](04-context-compaction.md) |
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |

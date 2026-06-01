@@ -24,6 +24,8 @@
 5. `04-context-compaction.md` — 호출자 주도 compact
 6. `05-messages.md` — 메시지/변환
 7. `06-invariants.md` — par-critical 불변식
+8. `07-data-models.md` — 전 데이터 모델 카탈로그
+9. `08-memory.md` — 영속 메모리 서브시스템(always-on, `MemoryStore` 교체)
 
 ## 아키텍처 큰 그림
 

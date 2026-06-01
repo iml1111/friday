@@ -117,7 +117,7 @@ from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = FridayAgent(provider=provider, tools=[...])
+engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite·memory 도구는 빌트인으로 자동 등록됨
 state = LoopState(messages=[create_user_message("질문")])
 while True:
     try:
@@ -170,6 +170,33 @@ pytest -v
 
 ---
 
+## 빌트인 능력 (always-on)
+
+호출자가 아무것도 배선하지 않아도 `FridayAgent`가 **항상 자동 등록·주입**하는 두 능력이 있다. opt-out은 없으며, 같은 이름의 도구를 `tools=`로 넘기면 `__init__`이 `ValueError`로 거부한다.
+
+### TODO 추적
+
+`TodoWrite` 도구가 항상 등록되고, todo 사용 가이던스(`TODO_GUIDANCE`)가 시스템 프롬프트에 항상 덧붙는다. 멀티스텝 작업에서 모델이 계획을 세우고 진행을 추적하는 용도다. 추적 리스트는 `LoopState.todos`에 살고, 매 턴 `<system-reminder>`로 API view에 재주입된다(비영속 — 분산 재개 시 `todos`에서 결정론적으로 재생성). 상세는 [02-tool-orchestration](docs/architecture/02-tool-orchestration.md) 참조.
+
+### 영속 메모리
+
+세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)와 도구 `memory_save`/`memory_read`/`memory_delete`가 항상 등록되고, 메모리 지침 + 자동 인덱스가 `step()`에서 세션 시작 시 1회 시스템 프롬프트에 주입된다.
+
+`MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**하므로, 자신의 store를 주입하면 기본 store와 도구가 통째로 대체된다:
+
+```python
+from friday_agent.memory.store import FileMemoryStore
+from friday_agent.core.engine import FridayAgent
+
+engine = FridayAgent(provider=provider, memory=FileMemoryStore("mem.md"))
+# 백엔드만 바꾸려면 MemoryStore의 save/read/delete/load_index만 구현(기본 tools() 상속);
+# 도구 표면까지 바꾸려면 tools()를 오버라이드.
+```
+
+기본 `FileMemoryStore`는 단일 프로세스/로컬 편의다 — 분산/클라우드 영속은 외부 Storage 기반 `MemoryStore`를 주입한다(provider·tools와 동일하게 컨테이너-로컬 재주입). 상세는 [08-memory](docs/architecture/08-memory.md) 참조.
+
+---
+
 ## 직접 도구 만들기 (BYO Tool)
 
 `ExampleTool`(`friday_agent/tools/builtin/example_tool.py`)이 도구 작성 패턴의 예시입니다.
@@ -203,6 +230,8 @@ class WeatherTool(Tool):
 ```
 
 만든 도구를 `FridayAgent(tools=[WeatherTool()])`에 넘기면 모델이 호출할 수 있습니다.
+
+> `TodoWrite`와 메모리 도구(`memory_save`/`memory_read`/`memory_delete`)는 빌트인이라 `tools=`에 직접 넣지 마세요 — 이름이 겹치면 `FridayAgent.__init__`이 `ValueError`로 거부합니다([빌트인 능력](#빌트인-능력-always-on) 참조).
 
 ### LLM은 도구를 어떻게 인지하는가
 
@@ -283,6 +312,8 @@ async for item in engine.step(state):           # 다음 턴 … Terminal까지 
 LLM 교체는 **`LLMProvider`** 한 인터페이스만 구현하면 됩니다(`friday_agent/api/provider.py`).
 `complete()`가 LLM 응답을 `AssistantResponse`로 정규화하면 코어 루프 코드를 바꾸지 않고 다른 백엔드로 동작합니다.
 추상화 경계 상세는 [03-llm-providers](docs/architecture/03-llm-providers.md) 참조.
+
+> 주입 가능한 seam은 LLM(`LLMProvider`) 외에 **메모리(`MemoryStore`)**도 있습니다 — 영속 백엔드와 그 도구를 함께 교체합니다(`FridayAgent(..., memory=...)`). 상세는 [08-memory](docs/architecture/08-memory.md) 참조.
 
 ---
 

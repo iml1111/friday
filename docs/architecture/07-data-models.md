@@ -17,6 +17,8 @@
 | `LoopState` | `core/state.py` | ✅ | 루프 상태(messages + turn_count + todos) + 턴 경계 "계속" 재개 sentinel — 이송 단위는 `json.dumps(loopstate.to_dict())` |
 | 그 외 전부 | — | ❌ | 런타임 전용 (provider·config·응답·도구 결과 등) |
 
+> **메모리 모델은 Store-local 런타임 객체**다 — `MemoryEntry`/`IndexEntry`(아래 2.7)는 `LoopState`에 직렬화되지 않고, `MemoryStore`는 provider·tools와 동일하게 컨테이너마다 재주입된다. 메모리 본문은 `LoopState.to_dict()`에 새지 않는다.
+
 ---
 
 ## ② 계층별 모델
@@ -161,6 +163,37 @@ provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한�
 
 ---
 
+### 2.7 메모리 — `memory/store.py` → 상세 [08-memory](08-memory.md)
+
+`MemoryStore` 서브시스템의 데이터 모델. 전부 **Store-local**이며 `LoopState`에 직렬화되지 않는다(컨테이너-로컬 재주입).
+
+#### `MemoryEntry` — 본문 포함 단위 (save/read가 다룸)
+
+| 필드 | 타입 | 의미 |
+|---|---|---|
+| `name` | `str` | 안정적 식별자(kebab-case) · upsert 키 |
+| `description` | `str` | 한 줄 요약 — 인덱스에 노출 |
+| `type` | `MemoryType` | `user` \| `feedback` \| `project` \| `reference` |
+| `body` | `str` | 메모리 본문 |
+| `updated_at` | `float \| None` | epoch 초 · freshness caveat 원천 |
+
+#### `IndexEntry` — 메타데이터만 (인덱스 주입용, body 없음)
+
+| 필드 | 타입 | 의미 |
+|---|---|---|
+| `name` | `str` | 식별자 |
+| `description` | `str` | 한 줄 요약 |
+| `type` | `MemoryType` | 타입 |
+| `updated_at` | `float \| None` | epoch 초 |
+
+#### `MemoryType` (str Enum)
+
+| 멤버 | 값 |
+|---|---|
+| `user` / `feedback` / `project` / `reference` | 동일 문자열 |
+
+---
+
 ## ③ 변환·이송 흐름 (한눈에)
 
 ```
@@ -188,3 +221,4 @@ provider.complete()
 |---|---|---|
 | `Tool` (ABC) | `tools/base.py` | [02](02-tool-orchestration.md) |
 | `LLMProvider` (ABC) | `api/provider.py` | [03](03-llm-providers.md) |
+| `MemoryStore` (ABC) | `memory/store.py` | [08](08-memory.md) |
