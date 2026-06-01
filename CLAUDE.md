@@ -24,6 +24,8 @@ A **domain-agnostic + LLM-agnostic** SDK for **running agent loops on the cloud/
 5. `04-context-compaction.md` — caller-driven compact
 6. `05-messages.md` — messages/conversion
 7. `06-invariants.md` — par-critical invariants
+8. `07-data-models.md` — catalog of all data models
+9. `08-memory.md` — persistent memory subsystem (always-on, `MemoryStore` replacement)
 
 ## Architecture Big Picture
 

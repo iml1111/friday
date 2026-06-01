@@ -40,6 +40,8 @@ If item is LoopState, call step() again with it as-is; if Terminal, stop.
 
 Emitting the serializable `LoopState` as-is at each turn boundary supports **stateless distributed resume**.
 
+In addition, `FridayAgent` always registers and injects **TodoWrite (todo tracking)** and **memory (`MemoryStore`)** as built-ins with no caller wiring — see [02-tool-orchestration](02-tool-orchestration.md) · [08-memory](08-memory.md) for details.
+
 ---
 
 ## Module Map
@@ -47,7 +49,7 @@ Emitting the serializable `LoopState` as-is at each turn boundary supports **sta
 | Subsystem | Files | Doc |
 |---|---|---|
 | `core/` | `loop.py`·`engine.py`·`state.py` | [01-core-loop](01-core-loop.md) |
-| `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py` | [02-tool-orchestration](02-tool-orchestration.md) |
+| `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py`·`builtin/todo_write.py` | [02-tool-orchestration](02-tool-orchestration.md) |
 | `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) |
 | `context/` | `compact.py` | [04-context-compaction](04-context-compaction.md) |
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |

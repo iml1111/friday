@@ -117,7 +117,7 @@ from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = FridayAgent(provider=provider, tools=[...])
+engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite·memory tools are auto-registered as built-ins
 state = LoopState(messages=[create_user_message("Question")])
 while True:
     try:
@@ -170,6 +170,33 @@ pytest -v
 
 ---
 
+## Built-in Capabilities (always-on)
+
+There are two capabilities that `FridayAgent` **always auto-registers·injects** even if the caller wires nothing. There is no opt-out, and if you pass a tool with the same name via `tools=`, `__init__` rejects it with `ValueError`.
+
+### TODO Tracking
+
+The `TodoWrite` tool is always registered, and the todo usage guidance (`TODO_GUIDANCE`) is always appended to the system prompt. It lets the model plan and track progress on multi-step tasks. The tracking list lives in `LoopState.todos` and is re-injected into the API view every turn as a `<system-reminder>` (non-persistent — regenerated deterministically from `todos` on distributed resume). For details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
+
+### Persistent Memory
+
+Persists typed facts (user/feedback/project/reference) long-term across session boundaries. The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) and the tools `memory_save`/`memory_read`/`memory_delete` are always registered, and the memory instructions + automatic index are injected into the system prompt once at session start in `step()`.
+
+A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**, so injecting your own store replaces the default store and tools wholesale:
+
+```python
+from friday_agent.memory.store import FileMemoryStore
+from friday_agent.core.engine import FridayAgent
+
+engine = FridayAgent(provider=provider, memory=FileMemoryStore("mem.md"))
+# To change only the backend, implement just MemoryStore's save/read/delete/load_index (inherit the default tools());
+# to change the tool surface too, override tools().
+```
+
+The default `FileMemoryStore` is a single-process/local convenience — for distributed/cloud persistence, inject a `MemoryStore` backed by external Storage (re-injected container-locally just like provider·tools). For details, see [08-memory](docs/architecture/08-memory.md).
+
+---
+
 ## Writing a Custom Tool (BYO Tool)
 
 `ExampleTool` (`friday_agent/tools/builtin/example_tool.py`) is an example of the tool-authoring pattern.
@@ -203,6 +230,8 @@ class WeatherTool(Tool):
 ```
 
 Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model can call it.
+
+> `TodoWrite` and the memory tools (`memory_save`/`memory_read`/`memory_delete`) are built-ins, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities-always-on)).
 
 ### How the LLM Recognizes Tools
 
@@ -283,6 +312,8 @@ Because the loop state is only ever updated at clean turn boundaries (preserving
 Swapping the LLM only requires implementing the single interface **`LLMProvider`** (`friday_agent/api/provider.py`).
 Once `complete()` normalizes the LLM response into `AssistantResponse`, a different backend works without changing the core loop code.
 For abstraction boundary details, see [03-llm-providers](docs/architecture/03-llm-providers.md).
+
+> Besides the LLM (`LLMProvider`), there is also an injectable seam for **memory (`MemoryStore`)** — it swaps the persistent backend and its tools together (`FridayAgent(..., memory=...)`). For details, see [08-memory](docs/architecture/08-memory.md).
 
 ---
 

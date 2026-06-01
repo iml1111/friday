@@ -17,6 +17,8 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 | `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
 | Everything else | — | ❌ | Runtime-only (provider, config, responses, tool results, etc.) |
 
+> **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.7 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
+
 ---
 
 ## ② Models by Layer
@@ -161,6 +163,37 @@ Implements `__str__`, so it is passed directly as `provider.complete(system_prom
 
 ---
 
+### 2.7 Memory — `memory/store.py` → details [08-memory](08-memory.md)
+
+Data models of the `MemoryStore` subsystem. All are **Store-local** and are not serialized into `LoopState` (container-local re-injection).
+
+#### `MemoryEntry` — unit including the body (handled by save/read)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | `str` | Stable identifier (kebab-case) · upsert key |
+| `description` | `str` | One-line summary — shown in the index |
+| `type` | `MemoryType` | `user` \| `feedback` \| `project` \| `reference` |
+| `body` | `str` | Memory body |
+| `updated_at` | `float \| None` | Epoch seconds · source of the freshness caveat |
+
+#### `IndexEntry` — metadata only (for index injection, no body)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | `str` | Identifier |
+| `description` | `str` | One-line summary |
+| `type` | `MemoryType` | Type |
+| `updated_at` | `float \| None` | Epoch seconds |
+
+#### `MemoryType` (str Enum)
+
+| Member | Value |
+|---|---|
+| `user` / `feedback` / `project` / `reference` | Same string |
+
+---
+
 ## ③ Conversion & Transport Flow (at a glance)
 
 ```
@@ -188,3 +221,4 @@ The following are interfaces/ABCs rather than dataclasses, so they are outside t
 |---|---|---|
 | `Tool` (ABC) | `tools/base.py` | [02](02-tool-orchestration.md) |
 | `LLMProvider` (ABC) | `api/provider.py` | [03](03-llm-providers.md) |
+| `MemoryStore` (ABC) | `memory/store.py` | [08](08-memory.md) |

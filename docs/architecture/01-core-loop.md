@@ -20,7 +20,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 | Path | Responsibility | Key Symbols |
 |---|---|---|
 | `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · backfill | `run_one_turn()`, `yield_missing_tool_result_blocks()` |
-| `friday_agent/core/engine.py` | External entry point, direct provider injection | `FridayAgent.step()`, `FridayAgent.compact()` |
+| `friday_agent/core/engine.py` | External entry point, direct provider injection, memory tool registration · section injection | `FridayAgent.step()`, `FridayAgent.compact()` |
 | `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `LoopState` (`to_dict`/`from_dict`) |
 
 ---
@@ -77,6 +77,7 @@ FridayAgent(
     system_prompt="",
     config=None,           # if unset, provider.config_type() defaults
     max_concurrency=10,
+    memory=None,           # MemoryStore — if unset, default FileMemoryStore(); the store is the tool surface
 )
 ```
 
@@ -127,6 +128,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 | `friday_agent/api/provider.py` | `LLMProvider`, `LLMError`, `ContextOverflowError`, response block types |
 | `friday_agent/context/compact.py` | `compact_conversation()`, `create_compact_summary_message()` — implementation of `engine.compact()` |
 | `friday_agent/api/prompts.py` | `assemble_system_prompt()` — system prompt assembly + general behavior block injection |
+| `friday_agent/memory/prompt.py` · `memory/store.py` | `build_memory_section()` — session-start memory section assembly for `engine.step()`; default `FileMemoryStore`/`MemoryStore` types |
 
 ---
 
@@ -135,6 +137,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 - **Context window management is the caller's responsibility.** `step()` sends `state.messages` to the API as-is. When the token budget is exceeded it throws `ContextOverflowError`, so the caller must reduce via `engine.compact(state)` and retry.
 - **General behavior block auto-injection.** `run_one_turn()` **always** appends `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · hooks · reversibility of actions · conciseness, etc.) after the caller's `system_prompt` when sending (`loop.py:166` › `assemble_system_prompt()`). There is no opt-out flag. The compaction summary call (`engine.compact()`) does not go through this path, so the general block does not leak into the summary.
 - **TodoWrite tool · guidance auto-injection (built-in).** `FridayAgent` always merges the tools from `builtin_tools()` (`tools/builtin/__init__.py`) into the caller's tools, and `assemble_system_prompt()` always appends `TODO_GUIDANCE` (no opt-out). If the caller injects a tool with the same name as a built-in, `FridayAgent.__init__` rejects it with `ValueError`. The compaction summary does not go through this prompt path, so `TODO_GUIDANCE` does not leak into the summary.
+- **Memory section injection (built-in).** At session start, `engine.step()` assembles `build_memory_section(self._memory)` once (cached for the instance lifetime = session-start snapshot) and appends it after the base system prompt. `compact()` does not go through this path, so the memory index does not leak into the summary. `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. The default store is `FileMemoryStore`, replaced via `FridayAgent(..., memory=...)`. See [08-memory](08-memory.md) for details.
 - **`tool_use↔tool_result` pair preservation.** On the `LLMError` path, backfill (`yield_missing_tool_result_blocks`) kicks in to prevent LLM API rejection. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
