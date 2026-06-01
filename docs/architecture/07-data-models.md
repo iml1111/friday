@@ -14,7 +14,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | Conversation history unit |
 | `ContentBlock` (internal flat) | `messages/types.py` | ✅ | Block inside a Message |
-| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
 | Everything else | — | ❌ | Runtime-only (provider, config, responses, tool results, etc.) |
 
 ---
@@ -60,6 +60,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 |---|---|---|
 | `messages` | `list[Message]` | Full history |
 | `turn_count` | `int` (default 1) | Turn counter |
+| `todos` | `list[dict]` (default `[]`) | Tracked todo list; each item `{"content", "status"}`. Injected into the API view as a reminder every turn (non-persistent) |
 
 Non-serializable runtime objects such as provider and config are intentionally excluded. When the loop continues after a turn completes, `run_one_turn()` yields this `LoopState` as-is (in contrast to `Terminal`).
 
@@ -137,6 +138,7 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 |---|---|---|
 | `data` | `Any` | Execution result (string/structured data) |
 | `is_error` | `bool` | Error flag (default `False`) |
+| `state_effect` | `dict \| None` | Declarative loop-state mutation (e.g. `{"todos": [...]}`); applied by the loop, default `None` |
 
 #### `Batch` (orchestrator-internal) — partitioning output
 

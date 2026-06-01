@@ -110,4 +110,8 @@ class FridayAgent:
             messages=api_messages,
         )
         summary_message = create_compact_summary_message(summary_text)
-        return LoopState(messages=[summary_message], turn_count=state.turn_count)
+        return LoopState(
+            messages=[summary_message],
+            turn_count=state.turn_count,
+            todos=state.todos,
+        )

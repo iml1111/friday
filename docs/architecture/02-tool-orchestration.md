@@ -56,11 +56,11 @@ Core contract:
 `orchestrator.py:145` / `core/loop.py:40,216` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
-# core/loop.py:40
+# core/loop.py
 from friday_agent.tools.orchestrator import run_tools
 
-# core/loop.py:216
-async for result_msg in run_tools(tool_use_blocks, tools, max_concurrency=max_concurrency):
+# core/loop.py — collect each tool's state_effect via effects_sink (message yield order unchanged)
+async for result_msg in run_tools(tool_use_blocks, tools, max_concurrency=max_concurrency, effects_sink=effects):
 ```
 
 Behavior:
@@ -68,6 +68,7 @@ Behavior:
 2. Parallel batch (`is_concurrency_safe=True` AND `len > 1`): limits concurrency with `asyncio.Semaphore(max_concurrency)` and runs via `asyncio.gather`. Results are yielded in block order.
 3. Otherwise (sequential batch or a single block): runs blocks one at a time, in order.
 4. Unknown tool · exception → generates an error `tool_result`, batch continues.
+5. If `effects_sink` (optional argument) is given, each tool's `ToolResult.state_effect` (when not None) is accumulated into the sink **in block order**. The message stream is unchanged, and `_run_single_tool` returns a `(Message, state_effect)` tuple. The loop gathers this sink to compute the next `LoopState.todos` (sole state writer = the loop).
 
 ---
 
@@ -148,6 +149,7 @@ To be eligible for a parallel batch, `is_concurrency_safe()` just needs to retur
 ToolResult(
     data,                   # execution result (string or structured data)
     is_error=False,
+    state_effect=None,      # declarative state mutation (e.g. {"todos": [...]}); applied solely by the loop
 )
 ```
 

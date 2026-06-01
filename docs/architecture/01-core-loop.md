@@ -32,17 +32,18 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 ### Execution Order
 
 ```
-1. normalize_for_api(state.messages)
-      └─ provider.complete()       ← LLM call
+1. api_input_messages = list(state.messages)
+      └─ if state.todos is set, inject <system-reminder> via with_todo_reminder() (API view only · non-persistent)
+      └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM call
 
 2. response → _to_assistant_message()     ← converted to internal Message, then yielded
 
 3. if there are tool_use blocks
-      └─ run_tools()                     ← parallel tool execution
+      └─ run_tools(effects_sink=effects) ← parallel tool execution + state_effect collection
             └─ yield tool_result message (each result)
 
-4. end of turn: yield 1 sentinel
-      LoopState              ─ loop continues
+4. end of turn: yield 1 sentinel (next_todos = apply_state_effects(state.todos, effects))
+      LoopState              ─ loop continues (clean state.messages + next_todos)
       Terminal               ─ loop terminates
 ```
 
@@ -112,7 +113,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 
 | Type | Defined At | Role |
 |---|---|---|
-| `LoopState(messages, turn_count=1)` | `core/state.py:39` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
+| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:39` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
 | `Terminal(reason, error=None)` | `core/state.py:19` | Loop termination sentinel |
 
 ---
@@ -135,7 +136,8 @@ See [04-context-compaction](04-context-compaction.md) for details.
 - **General behavior block auto-injection.** `run_one_turn()` **always** appends `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · hooks · reversibility of actions · conciseness, etc.) after the caller's `system_prompt` when sending (`loop.py:166` › `assemble_system_prompt()`). There is no opt-out flag. The compaction summary call (`engine.compact()`) does not go through this path, so the general block does not leak into the summary.
 - **`tool_use↔tool_result` pair preservation.** On the `LLMError` path, backfill (`yield_missing_tool_result_blocks`) kicks in to prevent LLM API rejection. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
-- **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count. provider · config are treated as container-local objects and re-injected on resume.
+- **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
+- **Per-turn todo reminders are non-persistent.** When `state.todos` is non-empty, every turn `run_one_turn()` merges a `<system-reminder>` into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state).
 
 ---
 

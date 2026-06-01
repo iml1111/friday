@@ -19,3 +19,8 @@ def test_loopstate_explicit_fields():
     s = LoopState(messages=[], turn_count=5)
     assert s.turn_count == 5
     assert len(s.messages) == 0
+
+
+def test_loopstate_todos_defaults_empty():
+    s = LoopState(messages=[create_user_message("hi")])
+    assert s.todos == []

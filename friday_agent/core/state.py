@@ -6,7 +6,7 @@ serves as the "continue" sentinel and the transport unit for distributed resume.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from friday_agent.messages.types import Message
@@ -37,18 +37,21 @@ class Terminal:
 class LoopState:
     """Serializable loop state, suitable for distributed resume.
 
-    Carries messages and turn_count across iterations; run_one_turn() yields it
-    directly as the "continue" sentinel at each turn boundary.
-    tool_use_context and pending_tool_use_summary are intentionally excluded:
-    they are non-serializable runtime objects.
+    Carries messages, turn_count, and todos across iterations; run_one_turn()
+    yields it directly as the "continue" sentinel at each turn boundary.
+    todos is JSON-native structured task state, re-injected into each turn's
+    API view as a reminder (see core/loop.py). Non-serializable runtime objects
+    (provider/config) are intentionally excluded.
     """
     messages: list[Any]                             # list[Message] (full history)
     turn_count: int = 1
+    todos: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "messages": [m.to_dict() for m in self.messages],
             "turn_count": self.turn_count,
+            "todos": self.todos,
         }
 
     @classmethod
@@ -56,4 +59,5 @@ class LoopState:
         return cls(
             messages=[Message.from_dict(m) for m in d.get("messages", [])],
             turn_count=d.get("turn_count", 1),
+            todos=d.get("todos", []),
         )

@@ -187,3 +187,23 @@ async def test_compact_does_not_inject_general_guidance():
     await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
     assert GENERAL_AGENT_GUIDANCE not in fake.received_system_prompts[0]
     assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_compact_preserves_todos():
+    """Compaction happens in long conversations — exactly when todo anti-drift
+    matters most — so todos must survive it (summary is prose; todos are state)."""
+    summary = AssistantResponse(
+        content=[TextBlock(text="<summary>S</summary>")],
+        stop_reason=StopReason.END_TURN, usage=TokenUsage(),
+    )
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[summary]), tools=[])
+    todos = [{"content": "A", "status": "in_progress"}]
+    state = LoopState(messages=[create_user_message("m1"), create_user_message("m2")],
+                      turn_count=4, todos=todos)
+
+    new_state = await engine.compact(state)
+
+    assert len(new_state.messages) == 1
+    assert new_state.turn_count == 4
+    assert new_state.todos == todos

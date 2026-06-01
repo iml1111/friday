@@ -55,3 +55,16 @@ def test_loop_state_roundtrip_defaults():
     s = LoopState(messages=[create_user_message("hi")])
     back = LoopState.from_dict(json.loads(json.dumps(s.to_dict())))
     assert back.turn_count == 1
+
+
+def test_loop_state_roundtrip_preserves_todos():
+    todos = [{"content": "A", "status": "in_progress"}, {"content": "B", "status": "pending"}]
+    s = LoopState(messages=_sample_messages(), turn_count=3, todos=todos)
+    back = LoopState.from_dict(json.loads(json.dumps(s.to_dict(), ensure_ascii=False)))
+    assert back.todos == todos
+
+
+def test_loop_state_from_dict_without_todos_defaults_empty():
+    # Legacy state dict (pre-todos) must not break.
+    s = LoopState.from_dict({"messages": [], "turn_count": 2})
+    assert s.todos == []
