@@ -18,29 +18,6 @@ User message → LLM call → stop_reason branch
 
 ---
 
-## 🧭 Implementation Guide — for Code Review
-
-All the core implementation lives in `friday_agent/`. The entry point is `friday_agent/core/engine.py` › `FridayAgent.step(state)` / `FridayAgent.compact(state)`, and the heart of the loop is `friday_agent/core/loop.py` › `run_one_turn()`.
-
-One pass of the turn loop:
-
-```
-run_one_turn() once
- 1. normalize_for_api() → provider.complete() call
- 2. stop_reason branch:
-      end_turn  → Terminal(completed)
-      tool_use  → run_tools() → append tool_result → next turn (LoopState)
- ContextOverflowError → caller runs engine.compact(state) → retry
- LLMError → Terminal(model_error) + tool_result backfill
-```
-
-For structural details (reading order·key data structures·invariants·module map), see [docs/architecture/](docs/architecture/00-overview.md).
-
-For the detailed list of pitfalls, see `CLAUDE.md` (Key Implementation Pitfalls) and [docs/architecture/06-invariants.md](docs/architecture/06-invariants.md).
-For adding tools·swapping the LLM·swapping the memory backend, see the [Extension Guide](#extension-guide-customizing-via-interface-injection).
-
----
-
 ## Requirements
 
 - **Python 3.11+**
@@ -135,37 +112,6 @@ while True:
 ```
 
 If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`.
-
----
-
-## Running the Verification Scripts (Real API)
-
-`scripts/` contains scripts that run each Phase's verification scenario against the real Anthropic API.
-**These call the real API, so they incur token costs** (each script is guardrailed with `max_tokens`).
-
-```bash
-# Inject the model ID via the LLM_MODEL environment variable (provider auto-routed by prefix)
-# P2 — single tool cycle: tool_use → tool_result → final response
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p2.py
-
-# P3 — caller-driven compact recovery verification (explicitly calls engine.compact() to check real-backend summarization+continuity)
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p3.py
-
-# P4 — real backend end-to-end + adapter swap structure demonstration
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p4.py
-```
-
-Each script prints a checklist and returns an exit code (0/1) along with PASS/FAIL.
-
-## Running Tests
-
-Unit/deterministic tests run **without an API key** (using a fake provider).
-
-```bash
-pytest
-# or verbose
-pytest -v
-```
 
 ---
 
@@ -347,10 +293,6 @@ For details, see [08-memory](docs/architecture/08-memory.md).
 
 ---
 
-## Package Structure (Module Map)
-
-All core code lives under `friday_agent/`. For each file's responsibility and entry symbols, see [the Module Map in 00-overview](docs/architecture/00-overview.md#module-map).
-
 ## Distributed Resume (stateless)
 
 To **split a multi-turn run turn by turn and distribute it across multiple containers**, use `step()` and the serialization API — one turn = one unit, and `LoopState` = the only state that crosses container boundaries.
@@ -378,8 +320,3 @@ async for item in engine.step(state):           # next turn … repeat until Ter
 ```
 
 Because the loop state is only ever updated at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `LoopState` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
-
-## Further Reading
-
-- `CLAUDE.md` — architecture big picture, Implementation Scope Charter, key pitfalls
-- `docs/architecture/` — implementation-centric architecture docs (source of truth)

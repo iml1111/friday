@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "friday-agent-loop"
-version = "0.1.0"
+version = "0.4.1"
 description = "LLM-agnostic SDK for running agentic loops server-side, distilled from analyzing multiple agent-loop architectures"
 requires-python = ">=3.11"
 dependencies = [
