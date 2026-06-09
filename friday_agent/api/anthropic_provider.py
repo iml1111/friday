@@ -153,7 +153,35 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         elif cfg.temperature is not None:
             params["temperature"] = cfg.temperature
 
+        # Prompt caching is always-on (no opt-out, mirroring OpenAI's automatic
+        # caching): place ephemeral breakpoints on the static prefix and the
+        # conversation history before sending.
+        self._apply_cache_control(params)
         return params
+
+    @staticmethod
+    def _apply_cache_control(params: dict) -> None:
+        """Place ephemeral cache breakpoints on the static prefix (last system
+        block — caches tools+system together, since tools render before system)
+        and the conversation history (last block of the final message, plus the
+        second-to-last message as a stable anchor: friday injects a turn-local
+        todo reminder into messages[-1] only, so messages[-2] is byte-stable
+        across turns and keeps the conversation prefix cache-readable). Always
+        within Anthropic's 4-breakpoint budget (system + 2 messages = 3).
+
+        Mutation is safe: system_blocks is built fresh in _build_params and
+        messages come from normalize_for_api (fresh dicts, never persisted).
+        """
+        mark = {"type": "ephemeral"}
+        system = params.get("system")
+        if system:
+            system[-1] = {**system[-1], "cache_control": mark}
+        messages = params.get("messages") or []
+        for idx in (-1, -2):
+            if len(messages) >= abs(idx):
+                content = messages[idx].get("content")
+                if isinstance(content, list) and content:
+                    content[-1] = {**content[-1], "cache_control": mark}
 
     # -- normalize ---------------------------------------------------------
     def normalize(self, native_response) -> AssistantResponse:

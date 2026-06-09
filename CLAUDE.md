@@ -65,8 +65,9 @@ engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) �
 | while-true 루프 + stop_reason 분기, 모든 종료/복구 경로 | 서브에이전트 위임 |
 | 도구 파티셔닝 + 동시성 (병렬/순차 배치) | 스트리밍 / 점진 표시 UX |
 | 외부 compact + 오버플로 전파(호출자 주도 compact) | Snip·Micro·Collapse 등 컨텍스트 최적화 |
-| 시스템 프롬프트 조립 machinery | Model fallback · Beta 헤더 · 프롬프트 캐싱 구체 |
+| 시스템 프롬프트 조립 machinery | Model fallback · Beta 헤더 |
 | LLM-agnostic 프로바이더 경계 | 벤더 빌드 모드(ant/REPL/SIMPLE) |
+| 프롬프트 캐싱 (시스템+도구+대화 히스토리, always-on; Anthropic 명시 breakpoint / OpenAI 자동) | mega-turn(>20블록) 중간 breakpoint · TTL 설정 · OpenAI `prompt_cache_key` |
 
 **Par-critical 정합성**: `tool_use`↔`tool_result` 쌍이 깨지면 LLM API가 요청을 거부한다. 복구·병렬 실행 어느 경로에서도 이 정합성을 보존해야 한다 (상세: `docs/architecture/06-invariants.md`).
 
@@ -102,4 +103,5 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 - `tool_result` 메시지의 `role`은 반드시 `"user"`, 첫 메시지도 user여야 한다 (role 교대 규칙).
 - `tool_use.input`은 (Anthropic SDK 기준) 이미 dict로 파싱돼 옴 — 직접 JSON 파싱 금지. (단 OpenAI 어댑터는 JSON 문자열 arguments를 파싱해 dict로 정규화한다 — 벤더별 차이.)
 - thinking 활성 시 `temperature` 전송 금지. 빈 `tools=[]`는 필드 자체를 생략.
+- 프롬프트 캐싱은 **always-on**(opt-out·config 노브 없음): Anthropic 어댑터 `_apply_cache_control`이 매 호출 마지막 system 블록(=tools+system) + 마지막/끝-2번째 메시지 블록에 `cache_control:{ephemeral}`을 배치한다(시스템+도구 프리픽스 + 대화 히스토리 캐시). `messages[-2]`가 안정 앵커 — 턴별 todo 리마인더가 `messages[-1]`에만 붙기 때문. OpenAI는 자동 캐싱이라 어댑터 무변경.
 - 병렬 실행해도 결과는 **tool_use 블록 순서대로** yield (`asyncio.gather`는 인자 순서 보장).

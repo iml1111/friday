@@ -55,7 +55,11 @@ def _convert_content_blocks(blocks: list[ContentBlock]) -> list[dict]:
                 entry["is_error"] = True
             api_content.append(entry)
         elif block.type == "thinking":
-            # thinking blocks must be echoed back verbatim; omitting one breaks the API turn
+            # thinking blocks must be echoed back verbatim, INCLUDING their signature;
+            # omitting the signature makes the API reject the next turn (400).
             if block.text is not None:
-                api_content.append({"type": "thinking", "thinking": block.text})
+                entry: dict = {"type": "thinking", "thinking": block.text}
+                if block.signature:
+                    entry["signature"] = block.signature
+                api_content.append(entry)
     return api_content

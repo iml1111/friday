@@ -9,6 +9,7 @@ from friday_agent.api.provider import (
     AssistantResponse,
     StopReason,
     TextBlock,
+    ThinkingBlock,
     TokenUsage,
     ToolUseBlock,
 )
@@ -52,3 +53,34 @@ async def test_tool_use_then_end_turn():
         if block.get("type") == "tool_result"
     ]
     assert any(block.get("tool_use_id") == "t1" for block in tool_results)
+
+
+@pytest.mark.asyncio
+async def test_thinking_signature_echoed_on_next_turn():
+    # Reproduces the reasoning round-trip bug: a thinking block emitted on turn 1
+    # must be echoed back WITH its signature on turn 2, or the API rejects the turn
+    # (400 "thinking.signature: Field required").
+    think = ThinkingBlock(thinking="reason", signature="sig123")
+    tu = ToolUseBlock(id="t1", name="ExampleTool", input={"payload": "hi", "mutating": False})
+    r1 = AssistantResponse(content=[think, tu], stop_reason=StopReason.TOOL_USE, usage=TokenUsage())
+    r2 = AssistantResponse(content=[TextBlock(text="done")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
+    fake = FakeLLMProvider(responses=[r1, r2])
+
+    async for _ in drive(
+        provider=fake,
+        tools=[ExampleTool()],
+        messages=[create_user_message("Process 'hi' with ExampleTool.")],
+    ):
+        pass
+
+    assert fake.call_count == 2
+    # The assistant message echoed back on the SECOND call must carry the signed thinking block.
+    thinking_blocks = [
+        block
+        for msg in fake.received_messages[1]
+        for block in msg.get("content", [])
+        if block.get("type") == "thinking"
+    ]
+    assert thinking_blocks, "prior thinking block must be echoed on the 2nd call"
+    assert thinking_blocks[0].get("thinking") == "reason"
+    assert thinking_blocks[0].get("signature") == "sig123"

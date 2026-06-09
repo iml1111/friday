@@ -86,8 +86,9 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | while-true 루프 + stop_reason 분기, 모든 종료/복구 경로 | 서브에이전트 위임 |
 | 도구 파티셔닝 + 동시성 (병렬/순차 배치) | 스트리밍 / 점진 표시 UX |
 | 외부 compact + 오버플로 전파(호출자 주도 compact) | Snip·Micro·Collapse 등 컨텍스트 최적화 |
-| 시스템 프롬프트 조립 machinery | Model fallback · Beta 헤더 · 프롬프트 캐싱 구체 |
+| 시스템 프롬프트 조립 machinery | Model fallback · Beta 헤더 |
 | LLM-agnostic 프로바이더 경계 | 벤더 빌드 모드(ant/REPL/SIMPLE) |
+| 프롬프트 캐싱 (시스템+도구+대화 히스토리, always-on; Anthropic 명시 breakpoint / OpenAI 자동) | mega-turn(>20블록) 중간 breakpoint · TTL 설정 · OpenAI `prompt_cache_key` |
 
 **Par-critical 정합성**: `tool_use`↔`tool_result` 쌍이 깨지면 LLM API가 요청을 거부한다. 복구·병렬 실행 어느 경로에서도 이 정합성을 보존해야 한다. 상세는 [06-invariants](06-invariants.md) 참조.
 

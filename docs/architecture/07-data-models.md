@@ -110,7 +110,7 @@ provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한�
 
 #### `TokenUsage`
 
-`input_tokens` · `output_tokens` · `cache_creation_input_tokens` · `cache_read_input_tokens` (전부 `int`, 캐시 미지원 백엔드는 0).
+`input_tokens` · `output_tokens` · `cache_creation_input_tokens` · `cache_read_input_tokens` (전부 `int`, 캐시 미지원 백엔드는 0; 프롬프트 캐싱이 always-on이라 Anthropic은 실측 비0, OpenAI는 자동 캐싱으로 채워진다).
 
 #### 예외 계층 (모델은 아니지만 흐름 제어 타입)
 

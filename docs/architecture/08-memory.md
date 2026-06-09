@@ -21,7 +21,7 @@
 
 ## ④ 엔진 통합 (루프 무변경)
 
-`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 매 턴 `build_memory_section()`을 async로 조립해(턴별 재구성, 캐시 없음) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다.
+`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 매 턴 `build_memory_section()`을 async로 조립해(턴별 재구성, 캐시 없음) base 시스템 프롬프트 뒤에 덧붙인다. `run_one_turn`·`assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 섹션을 주입하지 않아 인덱스가 요약에 새지 않는다. 프롬프트 캐싱(always-on)에서 이 섹션은 캐시되는 system 프리픽스 안에 위치한다 — 읽기 전용 턴은 바이트 안정(캐시 유지)이나, 메모리 쓰기는 다음 턴 system tier를 1회 재기록한다(읽기는 무효화 없음).
 
 ## ⑤ 분산 안전
 

@@ -55,8 +55,9 @@ def _to_assistant_message(response: AssistantResponse) -> Message:
                 )
             )
         elif isinstance(block, ThinkingBlock):
-            # Only the text content is preserved; normalize_for_api applies the same rule.
-            blocks.append(ContentBlock(type="thinking", text=block.thinking))
+            # Preserve both the thinking text and its signature; the API requires the
+            # signature when the block is echoed back on a later turn.
+            blocks.append(ContentBlock(type="thinking", text=block.thinking, signature=block.signature))
 
     # The response ID is not carried into the internal Message (no id field on Message).
     return Message(

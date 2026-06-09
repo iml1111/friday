@@ -14,6 +14,7 @@ class ContentBlock:
     tool_use_id: str | None = None     # type=="tool_result"
     content: str | None = None         # type=="tool_result"
     is_error: bool = False             # type=="tool_result"
+    signature: str | None = None       # type=="thinking" — required by the API when echoing thinking back
 
     def to_dict(self) -> dict:
         return {
@@ -25,6 +26,7 @@ class ContentBlock:
             "tool_use_id": self.tool_use_id,
             "content": self.content,
             "is_error": self.is_error,
+            "signature": self.signature,
         }
 
     @classmethod
@@ -38,6 +40,7 @@ class ContentBlock:
             tool_use_id=d.get("tool_use_id"),
             content=d.get("content"),
             is_error=d.get("is_error", False),
+            signature=d.get("signature"),
         )
 
 

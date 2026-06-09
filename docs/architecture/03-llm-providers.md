@@ -59,7 +59,7 @@ LLM 백엔드 교체 경계를 정의한다. 모든 completion 호출은 이 레
 | `MAX_TOKENS` | 출력 토큰 상한 도달 |
 | `CONTEXT_WINDOW_EXCEEDED` | 컨텍스트 윈도우 초과 (방어적 매핑; 실제 오버플로는 예외로 전달) |
 
-`api/provider.py:46` — `TokenUsage(input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens)`. 캐싱을 지원하지 않는 백엔드의 cache 필드는 0.
+`api/provider.py:46` — `TokenUsage(input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens)`. 캐싱을 지원하지 않는 백엔드의 cache 필드는 0. 프롬프트 캐싱이 always-on이 되어 Anthropic은 실측 비0, OpenAI는 자동 캐싱으로 이 필드들이 채워진다(④ 어댑터 차이 표 참조).
 
 ### LLMConfig (Protocol)
 
@@ -112,6 +112,7 @@ LLMError (base)
 | **thinking** | `thinking_enabled=True` 시 `temperature` 미전송 (`_build_params:175`) | thinking 미지원 |
 | **오버플로 판정** | 400/413 + 메시지 시그널 검사 (`_is_context_overflow:316`) | 400/413 + `body.error.code=="context_length_exceeded"` 또는 메시지 검사 (`_is_context_overflow:403`) |
 | **stop_reason 미매핑** | `END_TURN` 폴백 (`_map_stop_reason:258`) | `END_TURN` 폴백 (`_map_stop_reason:347`) |
+| **프롬프트 캐싱** | always-on. `_apply_cache_control`이 마지막 system 블록(=tools+system) + 마지막/끝-2 메시지 블록에 `cache_control:{ephemeral}` 배치 | 자동(요청측 opt-in 없음). `_extract_usage`가 `prompt_tokens_details.cached_tokens` 판독 |
 
 ---
 
@@ -145,6 +146,7 @@ core/engine.py       → provider.config_type 검증
 2. **빈 tools 생략** — `tools=[]`를 API에 보내면 일부 모델에서 요청 거부. 두 어댑터 모두 빈 리스트일 때 `tools` 필드를 생략한다.
 3. **`ContextOverflowError` 전파** — 어댑터가 400을 판정해 raise하면, `core/loop.py`가 이를 잡지 않고 호출자에게 전파한다. 호출자는 `engine.compact(state)` 후 재시도한다. 컨텍스트 compaction 흐름은 [04-context-compaction](04-context-compaction.md) 참조.
 4. **OpenAI 인수 파싱** — `_parse_arguments`는 JSON 파싱 실패 시 빈 dict `{}`를 반환한다. 어댑터를 수정할 때 파싱 예외를 루프 밖으로 누출하지 않도록 주의.
+5. **프롬프트 캐싱 always-on** — `_apply_cache_control`이 매 호출 `cache_control:{ephemeral}`을 마지막 system 블록과 마지막/끝-2 메시지 블록에 배치한다(시스템+도구 프리픽스 + 대화 히스토리). 프리픽스가 바이트 단위로 안정해야 적중하며, 모델별 최소 캐시 크기(Opus/Haiku 4.x=4096, Sonnet 4.6=2048 토큰) 미만이면 마커는 무해하고 `cache_creation=0`. 4-breakpoint 한도·20-block lookback 제약이 있다. `messages[-2]`를 안정 앵커로 쓰는 이유는 턴별 todo 리마인더가 `messages[-1]`에만 붙기 때문. config 노브는 없다(OpenAI의 불가피한 자동 캐싱과 always-on 빌트인 정책에 정렬).
 
 ---
 
