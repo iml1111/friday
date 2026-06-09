@@ -18,29 +18,6 @@
 
 ---
 
-## 🧭 구현 가이드 — 코드 리뷰용
-
-핵심 구현은 전부 `friday_agent/` 안에 있습니다. 진입점은 `friday_agent/core/engine.py` › `FridayAgent.step(state)` / `FridayAgent.compact(state)`이고, 루프 심장은 `friday_agent/core/loop.py` › `run_one_turn()`입니다.
-
-턴 루프 한 바퀴:
-
-```
-run_one_turn() 한 번
- 1. normalize_for_api() → provider.complete() 호출
- 2. stop_reason 분기:
-      end_turn  → Terminal(completed)
-      tool_use  → run_tools() → tool_result 추가 → 다음 턴(LoopState)
- ContextOverflowError → 호출자가 engine.compact(state) → 재시도
- LLMError → Terminal(model_error) + tool_result 백필
-```
-
-구조 상세(읽는 순서·핵심 데이터 구조·불변식·모듈 지도)는 [docs/architecture/](docs/architecture/00-overview.md) 참조.
-
-상세 함정 목록은 `CLAUDE.md`(구현 시 핵심 함정)와 [docs/architecture/06-invariants.md](docs/architecture/06-invariants.md)를 참고하세요.
-도구 추가·LLM 교체·메모리 백엔드 교체는 [확장 가이드](#확장-가이드-인터페이스-주입으로-커스터마이징)를 보세요.
-
----
-
 ## 요구 사항
 
 - **Python 3.11+**
@@ -135,37 +112,6 @@ while True:
 ```
 
 마지막으로 받은 item이 `Terminal`이면 루프를 종료합니다. `terminal.reason`은 `completed` / `model_error` 중 하나입니다.
-
----
-
-## 검증 스크립트 실행 (실 API)
-
-`scripts/`에는 각 Phase의 검증 시나리오를 실제 Anthropic API로 실행하는 스크립트가 있습니다.
-**실 API를 호출하므로 토큰 비용이 발생합니다** (각 스크립트는 `max_tokens`로 가드레일이 걸려 있습니다).
-
-```bash
-# 모델 ID는 LLM_MODEL 환경변수로 주입 (prefix로 provider 자동 라우팅)
-# P2 — 단일 도구 사이클: tool_use → tool_result → 최종 응답
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p2.py
-
-# P3 — 호출자 주도 compact 복구 검증 (engine.compact()를 명시 호출해 실백엔드 요약+연속성 확인)
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p3.py
-
-# P4 — 실 백엔드 엔드투엔드 + 어댑터 교체 구조 실증
-LLM_MODEL=claude-sonnet-4-6 python scripts/verify/verify_p4.py
-```
-
-각 스크립트는 체크리스트를 출력하고 PASS/FAIL과 함께 종료 코드(0/1)를 반환합니다.
-
-## 테스트 실행
-
-단위/결정적 테스트는 **API 키 없이** 동작합니다(가짜 provider 사용).
-
-```bash
-pytest
-# 또는 자세히
-pytest -v
-```
 
 ---
 
@@ -347,10 +293,6 @@ engine = FridayAgent(provider=provider, memory=RedisMemoryStore())   # store+도
 
 ---
 
-## 패키지 구조 (모듈 지도)
-
-핵심 코드는 전부 `friday_agent/` 아래에 있습니다. 각 파일의 책임과 진입 심볼은 [00-overview의 모듈 지도](docs/architecture/00-overview.md#모듈-지도)를 참조하세요.
-
 ## 분산 재개 (stateless)
 
 멀티턴을 **턴 단위로 끊어 여러 컨테이너에 분산**하려면 `step()`과 직렬화 API를 씁니다 — 한 턴 = 한 단위, `LoopState` = 컨테이너 경계를 넘는 유일한 상태입니다.
@@ -378,8 +320,3 @@ async for item in engine.step(state):           # 다음 턴 … Terminal까지 
 ```
 
 루프 상태는 항상 깨끗한 턴 경계에서만 업데이트되므로(`tool_use`↔`tool_result` 정합 보존) `LoopState`를 그대로 직렬화·재개할 수 있습니다. 설계 상세는 [01-core-loop](docs/architecture/01-core-loop.md) 참조.
-
-## 더 읽을거리
-
-- `CLAUDE.md` — 아키텍처 큰 그림, 구현 스코프 헌장, 핵심 함정
-- `docs/architecture/` — 구현체 중심 아키텍처 문서 (진실 공급원)
