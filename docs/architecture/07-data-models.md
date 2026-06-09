@@ -73,7 +73,7 @@ Non-serializable runtime objects such as provider and config are intentionally e
 | `reason` | `str` | Termination reason |
 | `error` | `Exception \| None` | Error object (on model_error) |
 
-> **⚠️ reason drift**: **the reasons `run_one_turn()` actually emits are just two, `completed`·`model_error`** (per the branch table in [01-core-loop](01-core-loop.md)). The `state.py` docstring also lists `blocking_limit`·`image_error`·`hook_stopped`, but these are not emitted on the current execution path. Context overflow is not a Terminal; it is raised to the caller as `ContextOverflowError`.
+> **Note**: `run_one_turn()` emits two reasons: `completed` and `model_error`. Context overflow is not a Terminal; it is raised to the caller as `ContextOverflowError`.
 
 ---
 
