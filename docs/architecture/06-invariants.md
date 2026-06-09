@@ -17,6 +17,7 @@
 | `temperature` not sent when thinking is enabled | Anthropic API rejects the two parameters together | `api/anthropic_provider.py:175-181` `_build_params()` — if `cfg.thinking_enabled`, sets only the `thinking` parameter; `temperature` is an `elif` branch (mutually exclusive) → [03-llm-providers](03-llm-providers.md) |
 | Empty `tools=[]` omits the `tools` field entirely | Some models treat an empty array as an error | `api/anthropic_provider.py:171-172` `if tools: params["tools"] = tools`; `api/openai_provider.py:172-173` `if oa_tools: params["tools"] = oa_tools` — both adapters apply the same guard in `_build_params()` → [03-llm-providers](03-llm-providers.md) |
 | thinking blocks are echoed verbatim | Omitting one breaks the API turn sequence (Anthropic requirement) | `messages/normalize.py:57-60` — the `block.type == "thinking"` branch inserts `{"type": "thinking", "thinking": block.text}` as-is; the comment states "omitting one breaks the API turn" → [05-messages](05-messages.md) |
+| Cache prefix byte stability (always-on prompt caching) | Any change invalidates that tier's cache — **cost invariant** (harmless to integrity: a miss does not affect output) | `api/anthropic_provider.py` `_apply_cache_control()` — places `cache_control:{ephemeral}` on the last system block + the last/second-to-last message blocks; `messages[-2]` is the stable anchor (per-turn reminders go only on `messages[-1]`) → [03-llm-providers](03-llm-providers.md) |
 
 ---
 
@@ -26,6 +27,6 @@ For the detailed implementation of each invariant, see the owning subsystem doc:
 
 - **[01-core-loop](01-core-loop.md)** — `run_one_turn()`, `yield_missing_tool_result_blocks()`, caller-driven compaction flow
 - **[02-tool-orchestration](02-tool-orchestration.md)** — `run_tools()` parallel execution · order preservation
-- **[03-llm-providers](03-llm-providers.md)** — `_build_params()` thinking/temperature mutual exclusion, empty tools handling
+- **[03-llm-providers](03-llm-providers.md)** — `_build_params()` thinking/temperature mutual exclusion, empty tools handling, `_apply_cache_control()` cache breakpoint placement
 - **[04-context-compaction](04-context-compaction.md)** — `ContextOverflowError` propagation, `engine.compact()` retry contract
 - **[05-messages](05-messages.md)** — role rules, thinking echo, `normalize_for_api()` serialization

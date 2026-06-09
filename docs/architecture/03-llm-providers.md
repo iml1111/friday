@@ -59,7 +59,7 @@ The class attribute `config_type: type[ConfigT]` must be set by the adapter. `Fr
 | `MAX_TOKENS` | Output token limit reached |
 | `CONTEXT_WINDOW_EXCEEDED` | Context window exceeded (defensive mapping; actual overflow is delivered as an exception) |
 
-`api/provider.py:46` — `TokenUsage(input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens)`. The cache fields are 0 for backends that do not support caching.
+`api/provider.py:46` — `TokenUsage(input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens)`. The cache fields are 0 for backends that do not support caching. With prompt caching always-on, these fields are populated — measured non-zero on Anthropic, and via automatic caching on OpenAI (see ④ Per-Adapter Differences).
 
 ### LLMConfig (Protocol)
 
@@ -112,6 +112,7 @@ The core of the vendor boundary — describes where the two adapters behave diff
 | **thinking** | `temperature` not sent when `thinking_enabled=True` (`_build_params:175`) | thinking not supported |
 | **Overflow detection** | 400/413 + message signal check (`_is_context_overflow:316`) | 400/413 + `body.error.code=="context_length_exceeded"` or message check (`_is_context_overflow:403`) |
 | **Unmapped stop_reason** | Falls back to `END_TURN` (`_map_stop_reason:258`) | Falls back to `END_TURN` (`_map_stop_reason:347`) |
+| **Prompt caching** | always-on. `_apply_cache_control` places `cache_control:{ephemeral}` on the last system block (=tools+system) + the last/second-to-last message blocks | Automatic (no request-side opt-in). `_extract_usage` reads `prompt_tokens_details.cached_tokens` |
 
 ---
 
@@ -145,6 +146,7 @@ The following invariants must be preserved when modifying adapters. See [06-inva
 2. **Omit empty tools** — sending `tools=[]` to the API causes request rejection on some models. Both adapters omit the `tools` field when the list is empty.
 3. **`ContextOverflowError` propagation** — when the adapter classifies a 400 and raises, `core/loop.py` does not catch it and propagates it to the caller. The caller retries after `engine.compact(state)`. See [04-context-compaction](04-context-compaction.md) for the context compaction flow.
 4. **OpenAI argument parsing** — `_parse_arguments` returns an empty dict `{}` on JSON parse failure. When modifying the adapter, take care not to leak parse exceptions out of the loop.
+5. **Prompt caching always-on** — on every call, `_apply_cache_control` places `cache_control:{ephemeral}` on the last system block and the last/second-to-last message blocks (system+tools prefix + conversation history). The prefix must be byte-for-byte stable to hit; below the per-model minimum cache size (Opus/Haiku 4.x=4096, Sonnet 4.6=2048 tokens) the markers are harmless and `cache_creation=0`. There is a 4-breakpoint limit and a 20-block lookback constraint. `messages[-2]` is used as the stable anchor because the per-turn todo reminder is attached only to `messages[-1]`. There is no config knob (aligned with OpenAI's unavoidable automatic caching and the always-on built-in policy).
 
 ---
 

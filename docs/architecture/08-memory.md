@@ -21,7 +21,7 @@ Keeps typed facts (user/feedback/project/reference) long-term across session bou
 
 ## ④ Engine Integration (loop unchanged)
 
-`FridayAgent.__init__` sets up a default `FileMemoryStore` and registers `store.tools()` alongside the built-in and caller tools (`ValueError` on name collision). Every turn, `step()` assembles `build_memory_section()` async (rebuilt per turn, no caching) and appends it after the base system prompt. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator are unchanged. `compact()` does not inject the memory section, so the index does not leak into the summary.
+`FridayAgent.__init__` sets up a default `FileMemoryStore` and registers `store.tools()` alongside the built-in and caller tools (`ValueError` on name collision). Every turn, `step()` assembles `build_memory_section()` async (rebuilt per turn, no caching) and appends it after the base system prompt. `run_one_turn`, `assemble_system_prompt`, `LoopState`, and the orchestrator are unchanged. `compact()` does not inject the memory section, so the index does not leak into the summary. Under prompt caching (always-on), this section sits inside the cached system prefix — read-only turns are byte-stable (cache retained), but a memory write rewrites the next turn's system tier once (reads cause no invalidation).
 
 ## ⑤ Distributed Safety
 

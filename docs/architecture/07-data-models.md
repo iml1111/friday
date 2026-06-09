@@ -110,7 +110,7 @@ The result of `provider.complete()` normalizing a vendor response. `loop._to_ass
 
 #### `TokenUsage`
 
-`input_tokens` · `output_tokens` · `cache_creation_input_tokens` · `cache_read_input_tokens` (all `int`, 0 on backends without cache support).
+`input_tokens` · `output_tokens` · `cache_creation_input_tokens` · `cache_read_input_tokens` (all `int`, 0 on backends without cache support; with prompt caching always-on, Anthropic reports measured non-zero values and OpenAI fills them via automatic caching).
 
 #### Exception hierarchy (not models, but flow-control types)
 

@@ -10,6 +10,7 @@ def _sample_messages():
     assistant = Message(
         type="assistant", role="assistant",
         content=[
+            ContentBlock(type="thinking", text="let me think", signature="sig-xyz"),
             ContentBlock(type="text", text="calling"),
             ContentBlock(type="tool_use", id="tu1", name="ExampleTool", input={"payload": "x"}),
         ],
@@ -41,6 +42,7 @@ def test_message_roundtrip_preserves_all_fields():
             assert cb_back.tool_use_id == cb.tool_use_id
             assert cb_back.content == cb.content
             assert cb_back.is_error == cb.is_error
+            assert cb_back.signature == cb.signature
 
 
 def test_loop_state_roundtrip():

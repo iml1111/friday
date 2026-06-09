@@ -65,8 +65,9 @@ The architecture docs intentionally describe only **"the essence of the agent lo
 | while-true loop + stop_reason branching, all termination/recovery paths | Subagent delegation |
 | Tool partitioning + concurrency (parallel/sequential batches) | Streaming / incremental display UX |
 | External compact + overflow propagation (caller-driven compact) | Context optimizations such as Snip·Micro·Collapse |
-| System prompt assembly machinery | Model fallback · Beta headers · prompt caching specifics |
+| System prompt assembly machinery | Model fallback · Beta headers |
 | LLM-agnostic provider boundary | Vendor build modes (ant/REPL/SIMPLE) |
+| Prompt caching (system+tools+conversation history, always-on; Anthropic explicit breakpoints / OpenAI automatic) | mega-turn (>20 blocks) intermediate breakpoints · TTL settings · OpenAI `prompt_cache_key` |
 
 **Par-critical integrity**: if a `tool_use`↔`tool_result` pair is broken, the LLM API rejects the request. This integrity must be preserved on every path, whether recovery or parallel execution (details: `docs/architecture/06-invariants.md`).
 
@@ -102,4 +103,5 @@ Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `too
 - The `role` of a `tool_result` message must be `"user"`, and the first message must also be user (role alternation rule).
 - `tool_use.input` arrives already parsed as a dict (per the Anthropic SDK) — do not JSON-parse it yourself. (However, the OpenAI adapter parses the JSON-string arguments and normalizes them to a dict — a vendor-specific difference.)
 - Do not send `temperature` when thinking is enabled. For an empty `tools=[]`, omit the field entirely.
+- Prompt caching is **always-on** (no opt-out·config knob): the Anthropic adapter's `_apply_cache_control` places `cache_control:{ephemeral}` on every call's last system block (=tools+system) + the last/second-to-last message blocks (system+tools prefix + conversation history cache). `messages[-2]` is the stable anchor — because the per-turn todo reminder is attached only to `messages[-1]`. OpenAI caches automatically, so its adapter is unchanged.
 - Even with parallel execution, results are yielded **in tool_use block order** (`asyncio.gather` preserves argument order).

@@ -61,3 +61,17 @@ def test_thinking_block_echoed():
     )
     out = normalize_for_api([msg])
     assert out == [{"role": "assistant", "content": [{"type": "thinking", "thinking": "reasoning"}]}]
+
+
+def test_thinking_block_echoes_signature():
+    # When a thinking block carries a signature it MUST be echoed back — the API
+    # rejects a thinking block without its signature on the next turn.
+    msg = Message(
+        type="assistant", role="assistant",
+        content=[ContentBlock(type="thinking", text="reasoning", signature="sig123")],
+    )
+    out = normalize_for_api([msg])
+    assert out == [{
+        "role": "assistant",
+        "content": [{"type": "thinking", "thinking": "reasoning", "signature": "sig123"}],
+    }]

@@ -86,8 +86,9 @@ The spec intentionally describes only **"the essence of the agent loop algorithm
 | while-true loop + stop_reason branching, all termination/recovery paths | Subagent delegation |
 | Tool partitioning + concurrency (parallel/sequential batches) | Streaming / incremental display UX |
 | External compact + overflow propagation (caller-driven compact) | Context optimizations such as Snip·Micro·Collapse |
-| System prompt assembly machinery | Model fallback · Beta headers · prompt caching specifics |
+| System prompt assembly machinery | Model fallback · Beta headers |
 | LLM-agnostic provider boundary | Vendor build modes (ant/REPL/SIMPLE) |
+| Prompt caching (system+tools+conversation history, always-on; Anthropic explicit breakpoints / OpenAI automatic) | mega-turn (>20 blocks) intermediate breakpoints · TTL settings · OpenAI `prompt_cache_key` |
 
 **Par-critical integrity**: if a `tool_use`↔`tool_result` pair is broken, the LLM API rejects the request. This integrity must be preserved on every path, including recovery and parallel execution. See [06-invariants](06-invariants.md) for details.
 
