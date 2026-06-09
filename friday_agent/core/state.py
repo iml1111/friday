@@ -20,11 +20,8 @@ class Terminal:
     """Returned when the agent loop terminates.
 
     reason values:
-      'completed'       — normal end-turn exit
-      'blocking_limit'  — context window exceeded
-      'model_error'     — API or network error
-      'image_error'     — image processing error
-      'hook_stopped'    — hook requested stop
+      'completed'    — normal end-turn exit
+      'model_error'  — API or network error
     """
     reason: str
     error: Exception | None = None

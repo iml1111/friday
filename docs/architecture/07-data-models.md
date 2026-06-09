@@ -73,7 +73,7 @@ provider·config 등 비직렬화 런타임 객체는 의도적으로 제외한�
 | `reason` | `str` | 종료 사유 |
 | `error` | `Exception \| None` | 오류 객체 (model_error 시) |
 
-> **⚠️ reason drift**: `run_one_turn()`이 **실제로 emit하는 reason은 `completed`·`model_error` 2가지**다 ([01-core-loop](01-core-loop.md) 분기표 기준). `state.py`의 docstring은 `blocking_limit`·`image_error`·`hook_stopped`도 나열하지만 현재 실행 경로에서는 방출되지 않는다. 컨텍스트 오버플로는 Terminal이 아니라 `ContextOverflowError`로 호출자에게 raise된다.
+> **참고**: `run_one_turn()`이 emit하는 reason은 `completed`·`model_error` 2가지다. 컨텍스트 오버플로는 Terminal이 아니라 `ContextOverflowError`로 호출자에게 raise된다.
 
 ---
 

@@ -58,8 +58,6 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 | `ContextOverflowError` | **호출자에게 raise** (Terminal 아님) — `engine.compact()` 후 재시도 |
 | 도구 실행 완료 | `LoopState(..., turn_count+1)` |
 
-> **drift 주의**: `friday_agent/core/state.py:19`의 `Terminal` docstring은 `blocking_limit` / `image_error` / `hook_stopped`도 나열하지만, `run_one_turn()`이 실제로 emit하는 사유는 위 2개(`completed` / `model_error`)뿐이다.
-
 ### 백필 (`yield_missing_tool_result_blocks`)
 
 `LLMError`로 턴이 중단되면, 아직 결과를 받지 못한 tool_use 블록에 대해 `friday_agent/core/loop.py:75` › `yield_missing_tool_result_blocks()`가 합성 오류 `tool_result`를 생성해 정합성을 복구한다. 상세는 [06-invariants](06-invariants.md) 참조.
@@ -135,7 +133,7 @@ step(state) → ContextOverflowError 발생
 ## ⑥ 유지보수 주의점
 
 - **컨텍스트 윈도우 관리는 호출자 책임.** `step()`은 `state.messages`를 그대로 API에 전송한다. 토큰 예산을 초과하면 `ContextOverflowError`를 던지므로, 호출자가 `engine.compact(state)`로 축소 후 재시도해야 한다.
-- **범용 행동블록 자동 주입.** `run_one_turn()`은 호출자 `system_prompt` 뒤에 `GENERAL_AGENT_GUIDANCE`(프롬프트 인젝션 플래깅·`<system-reminder>` 의미·hooks·행동의 가역성·간결성 등)를 **항상** 덧붙여 전송한다 (`loop.py:166` › `assemble_system_prompt()`). opt-out 플래그는 없다. 컴팩션 요약 호출(`engine.compact()`)은 이 경로를 거치지 않으므로 범용블록이 요약에 섞이지 않는다.
+- **범용 행동블록 자동 주입.** `run_one_turn()`은 호출자 `system_prompt` 뒤에 `GENERAL_AGENT_GUIDANCE`(프롬프트 인젝션 플래깅·`<system-reminder>` 의미·행동의 가역성·간결성 등)를 **항상** 덧붙여 전송한다 (`loop.py:166` › `assemble_system_prompt()`). opt-out 플래그는 없다. 컴팩션 요약 호출(`engine.compact()`)은 이 경로를 거치지 않으므로 범용블록이 요약에 섞이지 않는다.
 - **TodoWrite 도구·가이던스 자동 주입(빌트인).** `FridayAgent`는 `builtin_tools()`(`tools/builtin/__init__.py`)의 도구를 호출자 도구에 항상 병합하고, `assemble_system_prompt()`가 `TODO_GUIDANCE`를 항상 덧붙인다(opt-out 없음). 호출자가 빌트인과 같은 이름의 도구를 주입하면 `FridayAgent.__init__`이 `ValueError`로 거부한다. 컴팩션 요약은 이 프롬프트 경로를 거치지 않으므로 `TODO_GUIDANCE`가 요약에 섞이지 않는다.
 - **메모리 섹션 주입(빌트인).** `engine.step()`이 매 턴 `build_memory_section(self._memory)`를 조립(턴별 재구성, 캐시 없음)해 base 시스템 프롬프트 뒤에 덧붙인다. `compact()`는 이 경로를 거치지 않아 메모리 인덱스가 요약에 새지 않는다. `MemoryStore`는 `LoopState`에 직렬화되지 않으므로(컨테이너-로컬 재주입) 분산 재개 serde는 불변이다. 프롬프트 캐싱(always-on) 관점에선 이 섹션이 캐시되는 system 프리픽스 안에 있다 — 인덱스에 타임스탬프가 없어 읽기 전용 턴은 바이트 안정(캐시 적중)이나, `memory_save`/`delete`가 인덱스를 바꾸면 다음 턴 system tier가 1회 재기록된다(읽기는 무효화 없음). 기본 store는 `FileMemoryStore`이며 `FridayAgent(..., memory=...)`로 교체한다. 상세는 [08-memory](08-memory.md) 참조.
 - **`tool_use↔tool_result` 쌍 보존.** `LLMError` 경로에서 백필(`yield_missing_tool_result_blocks`)이 작동해 LLM API 거부를 방지한다. 이 불변식이 깨지면 다음 API 호출이 즉시 실패한다. 상세는 [06-invariants](06-invariants.md) 참조.

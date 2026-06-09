@@ -3,9 +3,7 @@ from friday_agent.messages.types import create_user_message
 
 
 def test_terminal_reasons_constructible():
-    for r in ("completed", "blocking_limit",
-              "model_error", "image_error",
-              "hook_stopped"):
+    for r in ("completed", "model_error"):
         assert Terminal(reason=r).reason == r
 
 
