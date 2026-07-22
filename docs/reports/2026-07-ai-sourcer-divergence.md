@@ -206,6 +206,8 @@ turn_reminders.extend([await build() for build in self._turn_sections])
 > **한 줄 요약**: breakpoint를 "메시지의 마지막 블록"이 아니라 "마지막 **영속** 블록"에 찍는다. 다음 턴에 사라질 리마인더 블록에 찍힌 breakpoint는 한 번도 적중하지 못하는 낭비 쓰기였다 — 세션 캐시 쓰기의 ~35% 실측.
 >
 > **커밋**: `3bb07bb` (07-20) · **파일**: `api/anthropic_provider.py`
+>
+> ✅ **업스트림 적용 완료** — 2026-07-22, friday `c985386` (테스트 6종 이식 + docs 03·06·CLAUDE.md 갱신 포함)
 
 #### 문제
 
@@ -468,7 +470,7 @@ vendored 사본의 GENERAL_AGENT_GUIDANCE는 업스트림 대비 크게 짧다. 
 
 | # | 항목 | 절 | 판정 | 요지 |
 |---|---|---|---|---|
-| 1 | 캐시 breakpoint 리마인더-스킵 | §5.2 | ✅ **그대로 이식 (최우선)** | 업스트림에서 todo 리마인더로 지금도 재현되는 낭비(~35% 실측). Anthropic 어댑터 국한, API 무변경, 테스트 동반 |
+| 1 | 캐시 breakpoint 리마인더-스킵 | §5.2 | ✅ **적용 완료** (2026-07-22, `c985386`) | 업스트림에서 todo 리마인더로 지금도 재현되는 낭비(~35% 실측). Anthropic 어댑터 국한, API 무변경, 테스트 동반 |
 | 2 | 메모리 인덱스 turn-local 분리 | §5.1 | ✅ **그대로 이식 (최우선)** | 업스트림의 "system tier 1회 재기록"은 실제론 대화 전체 무효화(120k+ 실측). export 1건 교체 + docs 갱신 동반 |
 | 3 | `with_turn_reminders` + `turn_reminders` 파라미터 | §5.1 | ✅ **이식** | #2의 전제 기계. todo 전용 로직의 자연스러운 일반화, 캐시 불변식 명문화 포함 |
 | 4 | `system_sections` · `turn_sections` 훅 | §5.3 | ✅ **이식 권장 (논의 1건)** | 범용 확장점으로 실전 검증(장부 실험이 SDK 포크 없이 수행·revert됨). 쟁점은 API 면 확장 vs 스코프 헌장 — "프롬프트 조립 machinery"의 확장으로 볼 근거 충분 |
