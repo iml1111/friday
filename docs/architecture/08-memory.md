@@ -21,7 +21,7 @@
 
 ## ④ 엔진 통합 (루프 무변경)
 
-`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 메모리 프롬프트를 **정적/동적으로 분리 주입**한다: 정적 지침 `MEMORY_INSTRUCTIONS`는 base 시스템 프롬프트 뒤에 덧붙고(세션 내 byte-stable — 캐시되는 system 프리픽스에 안전), 라이브 인덱스는 매 턴 `build_memory_reminder()`로 async 렌더돼 turn-local `<system-reminder>`로 `messages[-1]`에만 실린다(`run_one_turn`의 `turn_reminders` 경로, `LoopState` 비영속). 빈 store면 리마인더 블록 자체가 생기지 않는다(빈 상태 안내는 지침이 담당). `assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 프롬프트를 주입하지 않아 인덱스가 요약에 새지 않는다. 프롬프트 캐싱(always-on) 관점: `memory_save`/`delete`로 인덱스가 바뀌어도 system 프리픽스와 대화 히스토리 캐시는 그대로 살아남고, 바뀌는 것은 breakpoint 밖의 리마인더 블록뿐이다 — 인덱스를 system에 두면 저장 1회가 대화 전체 캐시를 무효화한다(구 설계의 실측 비용, ai-sourcer 발산 리포트 §5.1 참조).
+`FridayAgent.__init__`이 기본 `FileMemoryStore`를 세팅하고 `store.tools()`를 빌트인·호출자 도구와 함께 등록한다(이름 충돌 시 `ValueError`). `step()`은 메모리 프롬프트를 **정적/동적으로 분리 주입**한다: 정적 지침 `MEMORY_INSTRUCTIONS`는 base 시스템 프롬프트 앞에 오고(범용→구체 — 도메인 규칙이 recency 우위; 세션 내 byte-stable이라 캐시되는 system 프리픽스에 안전), 라이브 인덱스는 매 턴 `build_memory_reminder()`로 async 렌더돼 turn-local `<system-reminder>`로 `messages[-1]`에만 실린다(`run_one_turn`의 `turn_reminders` 경로, `LoopState` 비영속). 빈 store면 리마인더 블록 자체가 생기지 않는다(빈 상태 안내는 지침이 담당). `assemble_system_prompt`·`LoopState`·orchestrator는 불변. `compact()`는 메모리 프롬프트를 주입하지 않아 인덱스가 요약에 새지 않는다. 프롬프트 캐싱(always-on) 관점: `memory_save`/`delete`로 인덱스가 바뀌어도 system 프리픽스와 대화 히스토리 캐시는 그대로 살아남고, 바뀌는 것은 breakpoint 밖의 리마인더 블록뿐이다 — 인덱스를 system에 두면 저장 1회가 대화 전체 캐시를 무효화한다(구 설계의 실측 비용, ai-sourcer 발산 리포트 §5.1 참조).
 
 ## ⑤ 분산 안전
 

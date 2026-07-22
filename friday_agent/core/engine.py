@@ -108,8 +108,10 @@ class FridayAgent:
         # whole conversation cache, so it rides messages[-1] as a turn-local
         # reminder instead (rebuilt each turn from the store: fresh in the
         # distributed model where the caller reconstructs the engine per turn).
+        # Generic -> specific: SDK memory instructions before the caller's
+        # domain prompt, so domain rules keep the recency advantage.
         effective_prompt = (
-            f"{self._system_prompt}\n\n{MEMORY_INSTRUCTIONS}"
+            f"{MEMORY_INSTRUCTIONS}\n\n{self._system_prompt}"
             if self._system_prompt
             else MEMORY_INSTRUCTIONS
         )

@@ -43,7 +43,7 @@ Keep your text output brief and direct. Lead with the answer or action, not the 
 # Tone and style
  - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
  - Your responses should be short and concise.
- - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me check the file:" followed by a tool call should just be "Let me check the file." with a period."""
+ - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me check the file:" followed by a tool call should just be "Let me check the file." with a period. When the next action is obvious from context, prefer sending the tool call with no accompanying text at all — announcing each step is noise."""
 
 
 TODO_GUIDANCE: str = """# Task tracking
@@ -58,7 +58,10 @@ The current list is surfaced to you each turn inside a <system-reminder>; it ref
 def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
     """Assemble the full system prompt for a turn.
 
-    Injects the always-on general agent guidance (``GENERAL_AGENT_GUIDANCE``) and the todo-tracking guidance (``TODO_GUIDANCE``) after the caller's base prompt; there is no opt-out.
+    Injects the always-on general agent guidance (``GENERAL_AGENT_GUIDANCE``) and the
+    todo-tracking guidance (``TODO_GUIDANCE``) BEFORE the caller's base prompt; there
+    is no opt-out. Order is generic -> specific: the caller's domain prompt comes last
+    so its rules (e.g. an utterance policy) override the generic guidance by recency.
 
     Args:
         system_prompt: The caller-provided base system prompt (may be empty).
@@ -66,5 +69,5 @@ def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
     Returns:
         The fully assembled ``SystemPrompt``.
     """
-    blocks = [b for b in (system_prompt, GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE) if b]
+    blocks = [b for b in (GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE, system_prompt) if b]
     return SystemPrompt(text="\n\n".join(blocks))

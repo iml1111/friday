@@ -65,7 +65,7 @@ async def test_drive_passes_system_prompt():
             terminal = item
 
     assert terminal.reason == "completed"
-    assert fake.received_system_prompts[0].startswith("You are a test assistant.")
+    assert fake.received_system_prompts[0].endswith("You are a test assistant.")
     assert GENERAL_AGENT_GUIDANCE in fake.received_system_prompts[0]
 
 

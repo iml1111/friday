@@ -96,7 +96,7 @@ LLMError (base)
 
 `api/prompts.py:12` — `SystemPrompt(text)`는 `__str__`을 구현해 `LLMProvider.complete(system_prompt=str(sp))`에 직접 전달된다.
 
-- `assemble_system_prompt(system_prompt)` — base prompt 뒤에 `GENERAL_AGENT_GUIDANCE`를 주입한 뒤 `SystemPrompt`로 래핑한다. base가 비면 guidance만 반환.
+- `assemble_system_prompt(system_prompt)` — `GENERAL_AGENT_GUIDANCE`·`TODO_GUIDANCE`를 base prompt **앞에** 주입한 뒤 `SystemPrompt`로 래핑한다(범용→구체: 도메인 규칙이 recency 우위). base가 비면 guidance만 반환.
 
 ---
 

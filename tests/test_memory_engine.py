@@ -39,6 +39,8 @@ async def test_memory_instructions_injected_into_system_prompt():
     sp = fake.received_system_prompts[0]
     assert "BASE" in sp
     assert MEMORY_INSTRUCTIONS in sp
+    # Generic -> specific: SDK memory instructions precede the domain prompt.
+    assert sp.index(MEMORY_INSTRUCTIONS) < sp.index("BASE")
 
 
 @pytest.mark.asyncio
