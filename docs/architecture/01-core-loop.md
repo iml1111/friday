@@ -34,7 +34,7 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 ```
 1. api_input_messages = list(state.messages)
       └─ with_turn_reminders()로 <system-reminder> 주입 (API view 전용·비영속):
-         [todo 리마인더(state.todos 있을 때)] + turn_reminders 파라미터(호출자 제공) 순
+         [todo 리마인더(state.todos 있을 때)] + turn_reminders 파라미터(엔진이 메모리 인덱스 전달) 순
       └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM 호출
 
 2. 응답 → _to_assistant_message()       ← 내부 Message로 변환 후 yield
@@ -77,14 +77,12 @@ FridayAgent(
     config=None,           # 미지정 시 provider.config_type() 기본값
     max_concurrency=10,
     memory=None,           # MemoryStore — 미지정 시 메모리 서브시스템 미장착(opt-in); store가 곧 도구 표면
-    system_sections=None,  # list[async () -> str] — 정적 섹션, 도메인 프롬프트 뒤 system에 합류 (byte-stable 계약)
-    turn_sections=None,    # list[async () -> str] — 동적 콘텐츠, 매 턴 turn-local 리마인더로 messages[-1]에
 )
 ```
 
 `config`가 `provider.config_type`과 타입이 다르면 즉시 `ValueError`를 발생시킨다.
 
-`system_sections`·`turn_sections`는 호출자가 SDK를 포크하지 않고 도메인 콘텐츠를 주입하는 공식 확장점이다 — "정적은 system, 동적은 turn-local 리마인더"라는 캐시 이분법을 API 면으로 노출한 것. `system_sections`는 세션 내 byte-stable 출력이 계약이며(system은 캐시 프리픽스 최상단 — 변경 시 대화 캐시 전체 무효화), 턴마다 변하는 콘텐츠는 `turn_sections`로 싣는다. 양쪽 모두 기본값(빈 리스트)이면 출력이 훅 이전과 바이트 동일하다(behavior-neutral).
+컨텍스트 주입 면은 의도적으로 단순하다: 정적 콘텐츠는 호출자가 `system_prompt` 문자열 하나로 넘긴다(여러 섹션은 호출자 쪽에서 `"\n\n".join(...)`으로 조합). 동적(턴별 가변) 콘텐츠 주입 표면은 엔진에 없다 — SDK 내부(todo·메모리 인덱스)만 turn-local 리마인더 기계(`run_one_turn`의 `turn_reminders`)를 사용한다.
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Terminal, None]`
 
