@@ -159,15 +159,34 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self._apply_cache_control(params)
         return params
 
-    @staticmethod
-    def _apply_cache_control(params: dict) -> None:
+    # Turn-local reminder detection prefix — render_todo_reminder in loop.py
+    # wraps every turn-local reminder in this tag (existing convention).
+    _REMINDER_PREFIX = "<system-reminder>"
+
+    @classmethod
+    def _is_turn_reminder(cls, block: dict) -> bool:
+        return (
+            block.get("type") == "text"
+            and str(block.get("text", "")).startswith(cls._REMINDER_PREFIX)
+        )
+
+    @classmethod
+    def _apply_cache_control(cls, params: dict) -> None:
         """Place ephemeral cache breakpoints on the static prefix (last system
         block — caches tools+system together, since tools render before system)
-        and the conversation history (last block of the final message, plus the
-        second-to-last message as a stable anchor: friday injects a turn-local
-        todo reminder into messages[-1] only, so messages[-2] is byte-stable
-        across turns and keeps the conversation prefix cache-readable). Always
-        within Anthropic's 4-breakpoint budget (system + 2 messages = 3).
+        and the conversation history (last PERSISTENT block of the final two
+        messages). Always within Anthropic's 4-breakpoint budget
+        (system + 2 messages = 3).
+
+        Turn-local reminders (`<system-reminder>` blocks, e.g. the todo
+        reminder) are skipped when picking the breakpoint block: they vanish
+        from that position on the next call, so a breakpoint ON a reminder
+        produces a cache entry that never gets a hit — the previous turn's
+        new tool_result would then be cache-WRITTEN a second time on the
+        following call (measured in production: ~35% of session cache
+        writes). Anchoring on the last persistent block keeps the entry
+        byte-stable and reusable; the reminders after it are billed as plain
+        input (1x, cheaper than a wasted 1.25x write).
 
         Mutation is safe: system_blocks is built fresh in _build_params and
         messages come from normalize_for_api (fresh dicts, never persisted).
@@ -180,8 +199,15 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         for idx in (-1, -2):
             if len(messages) >= abs(idx):
                 content = messages[idx].get("content")
-                if isinstance(content, list) and content:
-                    content[-1] = {**content[-1], "cache_control": mark}
+                if not (isinstance(content, list) and content):
+                    continue
+                # Skip trailing reminders (non-persistent); an all-reminder
+                # message gets no mark — the messages[-2] anchor covers it.
+                i = len(content) - 1
+                while i >= 0 and cls._is_turn_reminder(content[i]):
+                    i -= 1
+                if i >= 0:
+                    content[i] = {**content[i], "cache_control": mark}
 
     # -- normalize ---------------------------------------------------------
     def normalize(self, native_response) -> AssistantResponse:

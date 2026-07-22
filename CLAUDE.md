@@ -103,5 +103,5 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 - `tool_result` 메시지의 `role`은 반드시 `"user"`, 첫 메시지도 user여야 한다 (role 교대 규칙).
 - `tool_use.input`은 (Anthropic SDK 기준) 이미 dict로 파싱돼 옴 — 직접 JSON 파싱 금지. (단 OpenAI 어댑터는 JSON 문자열 arguments를 파싱해 dict로 정규화한다 — 벤더별 차이.)
 - thinking 활성 시 `temperature` 전송 금지. 빈 `tools=[]`는 필드 자체를 생략.
-- 프롬프트 캐싱은 **always-on**(opt-out·config 노브 없음): Anthropic 어댑터 `_apply_cache_control`이 매 호출 마지막 system 블록(=tools+system) + 마지막/끝-2번째 메시지 블록에 `cache_control:{ephemeral}`을 배치한다(시스템+도구 프리픽스 + 대화 히스토리 캐시). `messages[-2]`가 안정 앵커 — 턴별 todo 리마인더가 `messages[-1]`에만 붙기 때문. OpenAI는 자동 캐싱이라 어댑터 무변경.
+- 프롬프트 캐싱은 **always-on**(opt-out·config 노브 없음): Anthropic 어댑터 `_apply_cache_control`이 매 호출 마지막 system 블록(=tools+system) + 마지막/끝-2번째 메시지의 마지막 **영속** 블록에 `cache_control:{ephemeral}`을 배치한다(시스템+도구 프리픽스 + 대화 히스토리 캐시). 트레일링 `<system-reminder>` 리마인더는 스킵 — 비영속 블록의 breakpoint는 재사용 불가. `messages[-2]`가 안정 앵커 — 턴별 todo 리마인더가 `messages[-1]`에만 붙기 때문. OpenAI는 자동 캐싱이라 어댑터 무변경.
 - 병렬 실행해도 결과는 **tool_use 블록 순서대로** yield (`asyncio.gather`는 인자 순서 보장).

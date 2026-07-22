@@ -17,7 +17,7 @@
 | thinking 활성 시 `temperature` 미전송 | Anthropic API가 두 파라미터 공존을 거부 | `api/anthropic_provider.py:175-181` `_build_params()` — `cfg.thinking_enabled`이면 `thinking` 파라미터만 설정, `elif`로 `temperature` 분기(상호 배타적) → [03-llm-providers](03-llm-providers.md) |
 | 빈 `tools=[]`는 `tools` 필드 자체를 생략 | 일부 모델이 빈 배열을 에러로 처리 | `api/anthropic_provider.py:171-172` `if tools: params["tools"] = tools`; `api/openai_provider.py:172-173` `if oa_tools: params["tools"] = oa_tools` — 두 어댑터 모두 `_build_params()`에서 동일한 방어 처리 → [03-llm-providers](03-llm-providers.md) |
 | thinking 블록은 verbatim 에코 | 생략 시 API 턴 시퀀스가 깨짐(Anthropic 요구사항) | `messages/normalize.py:57-60` — `block.type == "thinking"` 분기에서 `{"type": "thinking", "thinking": block.text}`를 그대로 삽입; 주석에 "omitting one breaks the API turn" 명시 → [05-messages](05-messages.md) |
-| 캐시 프리픽스 바이트 안정성 (always-on 프롬프트 캐싱) | 변하면 해당 tier 캐시 무효화 — **비용 불변식**(정합성은 무해: 미스는 출력에 영향 없음) | `api/anthropic_provider.py` `_apply_cache_control()` — 마지막 system 블록 + 마지막/끝-2 메시지 블록에 `cache_control:{ephemeral}` 배치; `messages[-2]`가 안정 앵커(턴별 리마인더는 `messages[-1]`에만) → [03-llm-providers](03-llm-providers.md) |
+| 캐시 프리픽스 바이트 안정성 (always-on 프롬프트 캐싱) | 변하면 해당 tier 캐시 무효화 — **비용 불변식**(정합성은 무해: 미스는 출력에 영향 없음) | `api/anthropic_provider.py` `_apply_cache_control()` — 마지막 system 블록 + 마지막/끝-2 메시지의 마지막 **영속** 블록에 `cache_control:{ephemeral}` 배치(트레일링 `<system-reminder>` 리마인더 스킵 — 비영속 블록의 breakpoint는 재사용 불가); `messages[-2]`가 안정 앵커(턴별 리마인더는 `messages[-1]`에만) → [03-llm-providers](03-llm-providers.md) |
 
 ---
 
