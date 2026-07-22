@@ -77,10 +77,14 @@ FridayAgent(
     config=None,           # 미지정 시 provider.config_type() 기본값
     max_concurrency=10,
     memory=None,           # MemoryStore — 미지정 시 기본 FileMemoryStore(); store가 곧 도구 표면
+    system_sections=None,  # list[async () -> str] — 정적 섹션, 도메인 프롬프트 뒤 system에 합류 (byte-stable 계약)
+    turn_sections=None,    # list[async () -> str] — 동적 콘텐츠, 매 턴 turn-local 리마인더로 messages[-1]에
 )
 ```
 
-`config`가 `provider.config_type`과 타입이 다르면 즉시 `ValueError`를 발생시킨다 (`friday_agent/core/engine.py:71`).
+`config`가 `provider.config_type`과 타입이 다르면 즉시 `ValueError`를 발생시킨다.
+
+`system_sections`·`turn_sections`는 호출자가 SDK를 포크하지 않고 도메인 콘텐츠를 주입하는 공식 확장점이다 — "정적은 system, 동적은 turn-local 리마인더"라는 캐시 이분법을 API 면으로 노출한 것. `system_sections`는 세션 내 byte-stable 출력이 계약이며(system은 캐시 프리픽스 최상단 — 변경 시 대화 캐시 전체 무효화), 턴마다 변하는 콘텐츠는 `turn_sections`로 싣는다. 양쪽 모두 기본값(빈 리스트)이면 출력이 훅 이전과 바이트 동일하다(behavior-neutral).
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Terminal, None]`
 

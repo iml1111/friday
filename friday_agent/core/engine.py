@@ -9,7 +9,7 @@ drives the turn loop by calling step() until the sentinel is a Terminal.
 from __future__ import annotations
 
 from collections import Counter
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
@@ -44,6 +44,19 @@ class FridayAgent:
                 Defaults to the provider's default config (provider.config_type())
                 when None.
         max_concurrency: Maximum concurrent tool executions (default 10).
+        system_sections: Async callables returning a string, appended in order
+                after the caller's domain prompt each turn. Sections returning
+                an empty string are filtered out. Default is an empty list —
+                output is byte-for-byte identical to injecting no sections
+                (behavior-neutral). Must render byte-stable output within a
+                session: the system prompt is the top of the cache prefix, so
+                any change invalidates the entire conversation cache. Per-turn
+                mutable content belongs in turn_sections instead.
+        turn_sections: Async callables returning a string, rendered each turn
+                and injected as turn-local reminder blocks onto the trailing
+                user message (after the todo and memory-index reminders) —
+                never persisted into LoopState. Use for content that changes
+                during a session; empty strings are dropped.
 
     Raises:
         ValueError: When config is given but its type does not match the
@@ -58,6 +71,8 @@ class FridayAgent:
         config: LLMConfig | None = None,
         max_concurrency: int = 10,
         memory: MemoryStore | None = None,
+        system_sections: list[Callable[[], Awaitable[str]]] | None = None,
+        turn_sections: list[Callable[[], Awaitable[str]]] | None = None,
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -84,6 +99,8 @@ class FridayAgent:
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
+        self._system_sections = list(system_sections or [])
+        self._turn_sections = list(turn_sections or [])
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -102,20 +119,18 @@ class FridayAgent:
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
-        # Static/dynamic split: MEMORY_INSTRUCTIONS is session-stable, so it is
-        # safe in the cached system prefix. The live index changes on every
-        # memory_save/delete — in the system prompt it would invalidate the
-        # whole conversation cache, so it rides messages[-1] as a turn-local
-        # reminder instead (rebuilt each turn from the store: fresh in the
-        # distributed model where the caller reconstructs the engine per turn).
-        # Generic -> specific: SDK memory instructions before the caller's
-        # domain prompt, so domain rules keep the recency advantage.
-        effective_prompt = (
-            f"{MEMORY_INSTRUCTIONS}\n\n{self._system_prompt}"
-            if self._system_prompt
-            else MEMORY_INSTRUCTIONS
-        )
+        # System prefix: static pieces only, ordered generic -> specific
+        # (memory instructions -> domain prompt -> caller sections) — must be
+        # byte-stable within a session so the cache prefix survives. Per-turn
+        # mutable content (live memory index, turn_sections outputs) is rebuilt
+        # every turn and rides messages[-1] as turn-local reminders instead —
+        # in the system prompt it would invalidate the whole conversation cache.
+        extra_sections = [await build() for build in self._system_sections]
+        parts = [p for p in (MEMORY_INSTRUCTIONS, self._system_prompt, *extra_sections) if p]
+        effective_prompt = "\n\n".join(parts)
         turn_reminders = [await build_memory_reminder(self._memory)]
+        turn_reminders.extend([await build() for build in self._turn_sections])
+        turn_reminders = [t for t in turn_reminders if t]
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(
             provider=self._provider,
