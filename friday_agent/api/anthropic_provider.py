@@ -25,6 +25,7 @@ from friday_agent.api.provider import (
     ToolUseBlock,
     TransientError,
 )
+from friday_agent.messages.types import SYSTEM_REMINDER_PREFIX
 
 
 # ---------------------------------------------------------------------------
@@ -159,15 +160,14 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self._apply_cache_control(params)
         return params
 
-    # Turn-local reminder detection prefix — render_todo_reminder in loop.py
-    # wraps every turn-local reminder in this tag (existing convention).
-    _REMINDER_PREFIX = "<system-reminder>"
-
-    @classmethod
-    def _is_turn_reminder(cls, block: dict) -> bool:
+    @staticmethod
+    def _is_turn_reminder(block: dict) -> bool:
+        # Every turn-local reminder producer (todo in core/loop.py, memory
+        # index in memory/store.py) wraps via messages.types.wrap_system_reminder,
+        # so the shared SYSTEM_REMINDER_PREFIX is the detection contract.
         return (
             block.get("type") == "text"
-            and str(block.get("text", "")).startswith(cls._REMINDER_PREFIX)
+            and str(block.get("text", "")).startswith(SYSTEM_REMINDER_PREFIX)
         )
 
     @classmethod

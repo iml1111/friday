@@ -34,6 +34,7 @@ from friday_agent.messages.types import (
     Message,
     create_tool_result_message,
     create_user_message,
+    wrap_system_reminder,
 )
 from friday_agent.tools.base import Tool
 from friday_agent.tools.orchestrator import run_tools
@@ -131,12 +132,10 @@ def render_todo_reminder(todos: list[dict]) -> str:
     lines = "\n".join(
         f"- [{t.get('status', 'pending')}] {t.get('content', '')}" for t in todos
     )
-    return (
-        "<system-reminder>\n"
+    return wrap_system_reminder(
         "Current todo list (update via TodoWrite as you progress; keep one item in_progress):\n"
         f"{lines}\n"
-        "This reflects tracked state, not necessarily the user's latest instruction.\n"
-        "</system-reminder>"
+        "This reflects tracked state, not necessarily the user's latest instruction."
     )
 
 

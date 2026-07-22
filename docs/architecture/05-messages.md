@@ -11,7 +11,7 @@
 
 | 경로 | 책임 | 핵심 심볼 |
 |---|---|---|
-| `friday_agent/messages/types.py` | 내부 Message·ContentBlock·생성 헬퍼 | `Message`, `ContentBlock`, `create_user_message()`, `create_tool_result_message()` |
+| `friday_agent/messages/types.py` | 내부 Message·ContentBlock·생성 헬퍼 + 턴-로컬 리마인더 프로토콜 | `Message`, `ContentBlock`, `create_user_message()`, `create_tool_result_message()`, `wrap_system_reminder()`, `SYSTEM_REMINDER_PREFIX` |
 | `friday_agent/messages/normalize.py` | API 형식 변환 | `normalize_for_api()` |
 
 ---
@@ -114,13 +114,15 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 
 ## ④ 공개 API
 
-루프(`core/loop.py`), 오케스트레이터(`tools/orchestrator.py`), 컴팩터(`context/compact.py`)가 아래 3개 심볼을 직접 임포트해 사용한다.
+루프(`core/loop.py`), 오케스트레이터(`tools/orchestrator.py`), 컴팩터(`context/compact.py`)가 앞의 3개 심볼을 직접 임포트해 사용하고, 턴-로컬 리마인더 프로토콜 2개 심볼은 리마인더 생산자(`core/loop.py`·`memory/store.py`)와 감지자(`api/anthropic_provider.py`)가 공유한다.
 
 | 심볼 | 위치 | 역할 |
 |---|---|---|
 | `create_user_message()` | `messages/types.py:81` | 사용자 입력·메타 메시지 생성 |
 | `create_tool_result_message()` | `messages/types.py:98` | 도구 결과 메시지 생성 |
 | `normalize_for_api()` | `messages/normalize.py:6` | API 전송 직전 변환 |
+| `wrap_system_reminder()` | `messages/types.py:124` | 턴-로컬 리마인더 `<system-reminder>` 래핑 (모든 생산자 공용) |
+| `SYSTEM_REMINDER_PREFIX` | `messages/types.py:121` | Anthropic 어댑터 캐시 breakpoint 스킵의 감지 계약 |
 
 ---
 
@@ -145,6 +147,7 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 - **role 교대 규칙**: `tool_result` 메시지는 반드시 `role="user"`여야 하고, 대화의 첫 메시지도 user여야 한다. `create_tool_result_message()`가 이를 강제한다. 위반 시 API가 요청을 거부한다. 상세 규칙은 [06-invariants](06-invariants.md) 참조.
 - **thinking verbatim 에코**: `normalize_for_api()`의 `thinking` 블록 변환은 절대 생략하거나 변형해서는 안 된다. 누락 시 API 턴이 깨진다([06-invariants](06-invariants.md)).
 - **tool_result `<tool_use_error>` 래핑**: `create_tool_result_message(is_error=True)`는 `content` 텍스트를 `<tool_use_error>...</tool_use_error>`로 래핑한다(`messages/types.py:109`). LLM이 에러 컨텍스트를 인식하도록 하는 규약이므로 임의로 태그를 바꾸지 않는다.
+- **`<system-reminder>` 태그 단일 정의**: 턴-로컬 리마인더 태그는 `messages/types.py`의 `wrap_system_reminder()`/`SYSTEM_REMINDER_PREFIX` 한 곳에서만 정의된다. 생산자(todo·메모리 인덱스)와 Anthropic 어댑터의 breakpoint 스킵 감지가 이 상수를 공유하므로 리터럴을 재복제하면 캐시 스킵이 조용히 깨진다.
 - **`is_meta` 플래그 남용 금지**: `is_meta=True` 메시지는 `normalize_for_api()`에서 투명하게 제거된다. 루프 내부 합성 메시지 외에 사용하면 API에 전달해야 할 메시지가 누락될 수 있다.
 - **이름 충돌**: `messages/types.py`의 `ContentBlock`과 `api/provider.py`의 `ContentBlock`(Union 앨리어스)을 같은 파일에서 임포트하면 이름이 충돌한다. 필요 시 `as` 앨리어스로 구분한다.
 

@@ -16,6 +16,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from friday_agent.messages.types import wrap_system_reminder
+
 if TYPE_CHECKING:
     from friday_agent.tools.base import Tool
 
@@ -225,7 +227,8 @@ to save and recall typed facts.
    proves wrong or outdated, re-save it corrected or memory_delete it.
  - Do NOT save what is derivable (code structure, architecture, git history),
    one-off fixes, or ephemeral conversation/run state.
- - Before relying on a memory that names a file/function/flag, verify it still
+ - Read a memory when it is relevant to the task at hand or the user asks.
+   Before relying on a memory that names a file/function/flag, verify it still
    exists. If the user says to ignore memory, act as if it were empty.
 
 Your current memory index arrives each turn as a <system-reminder> block near the
@@ -234,16 +237,21 @@ the index from the next turn on). No index block = empty memory — save memorie
 as you learn about the user, their feedback, and the project."""
 
 
+def _oneline(s: str) -> str:
+    return " ".join(s.split())
+
+
 async def build_memory_reminder(store: MemoryStore) -> str:
     """Render the live memory index as a turn-local <system-reminder> block.
-    Empty store -> '' (the empty-state nudge lives in MEMORY_INSTRUCTIONS)."""
+    Empty store -> '' (the empty-state nudge lives in MEMORY_INSTRUCTIONS).
+    Name/description are collapsed to single lines — the index is line-oriented
+    and the MemoryStore ABC does not force single-line metadata."""
     entries = await store.load_index()
     if not entries:
         return ""
-    lines = "\n".join(f"- [{e.type.value}] {e.name} — {e.description}" for e in entries)
-    return (
-        "<system-reminder>\n"
-        "Current memory index (rebuilt each turn from your saved memories):\n"
-        f"{lines}\n"
-        "</system-reminder>"
+    lines = "\n".join(
+        f"- [{e.type.value}] {_oneline(e.name)} — {_oneline(e.description)}" for e in entries
+    )
+    return wrap_system_reminder(
+        f"Current memory index (rebuilt each turn from your saved memories):\n{lines}"
     )

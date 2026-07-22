@@ -9,6 +9,7 @@ cache-written a second time on the following call (measured in production:
 PERSISTENT block, skipping trailing reminders.
 """
 from friday_agent.api.anthropic_provider import AnthropicProvider
+from friday_agent.messages.types import wrap_system_reminder
 
 _EPHEMERAL = {"type": "ephemeral"}
 
@@ -82,6 +83,15 @@ def test_no_reminder_behaves_as_before():
 def test_user_text_with_trailing_reminder_marks_the_text():
     # First turn of a session: [user text, reminder] -> mark the user text.
     msgs = [{"role": "user", "content": [_text("find the backend"), _reminder()]}]
+    p = _apply(msgs)
+    blocks = p["messages"][-1]["content"]
+    assert _marked(blocks[0]) and not _marked(blocks[1])
+
+
+def test_wrap_system_reminder_output_is_skipped():
+    # Producer-detector contract: anything wrapped by the shared helper must
+    # be treated as a turn-local reminder by the breakpoint skip.
+    msgs = [{"role": "user", "content": [_text("hi"), _text(wrap_system_reminder("any body"))]}]
     p = _apply(msgs)
     blocks = p["messages"][-1]["content"]
     assert _marked(blocks[0]) and not _marked(blocks[1])
