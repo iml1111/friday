@@ -140,20 +140,29 @@ def render_todo_reminder(todos: list[dict]) -> str:
     )
 
 
-def with_todo_reminder(messages: list[Message], todos: list[dict]) -> list[Message]:
-    """Return a turn-local message list with the todo reminder joined onto the
-    trailing user turn. Never mutates the input messages, so state.messages and
-    the persisted LoopState stay reminder-free (distributed-resume deterministic).
+def with_turn_reminders(messages: list[Message], texts: list[str]) -> list[Message]:
+    """Return a turn-local message list with reminder text blocks joined onto
+    the trailing user turn, in the given order (empty strings dropped). Never
+    mutates the input messages, so state.messages and the persisted LoopState
+    stay reminder-free (distributed-resume deterministic).
+
+    Cache invariant: all per-turn mutable text rides messages[-1] only, keeping
+    messages[-2] and earlier byte-stable so the provider's rolling cache
+    breakpoints keep hitting (see anthropic_provider._apply_cache_control).
     """
-    text = render_todo_reminder(todos)
-    if not text:
+    blocks = [ContentBlock(type="text", text=t) for t in texts if t]
+    if not blocks:
         return messages
-    block = ContentBlock(type="text", text=text)
     if messages and messages[-1].role == "user":
         last = messages[-1]
-        merged = replace(last, content=[*last.content, block])   # new object; original untouched
+        merged = replace(last, content=[*last.content, *blocks])  # new object; original untouched
         return [*messages[:-1], merged]
-    return [*messages, create_user_message([block])]             # defensive: never hit at turn start
+    return [*messages, create_user_message(blocks)]              # defensive: never hit at turn start
+
+
+def with_todo_reminder(messages: list[Message], todos: list[dict]) -> list[Message]:
+    """Turn-local todo reminder on the trailing user turn (with_turn_reminders shorthand)."""
+    return with_turn_reminders(messages, [render_todo_reminder(todos)])
 
 
 async def run_one_turn(
@@ -165,6 +174,7 @@ async def run_one_turn(
     system_prompt: str = "",
     config: LLMConfig | None = None,
     max_concurrency: int = 10,
+    turn_reminders: list[str] | None = None,
 ) -> AsyncGenerator[Message | Terminal | LoopState, None]:
     """Execute a single turn of the agent loop.
 
@@ -180,6 +190,9 @@ async def run_one_turn(
         system_prompt: Base system prompt text.
         config: LLM call configuration. Defaults to provider.config_type().
         max_concurrency: Maximum concurrent tool executions passed to run_tools.
+        turn_reminders: Pre-rendered turn-local reminder texts (e.g. a live
+            memory index) appended after the todo reminder onto the trailing
+            user message of the API view only — never persisted into LoopState.
 
     Yields:
         Message: messages produced this turn (assistant response, tool_result messages).
@@ -196,11 +209,12 @@ async def run_one_turn(
     turn_count = state.turn_count
 
     # API view only (turn-local, never persisted): inject the live todo reminder
-    # so the model sees current progress without re-calling TodoWrite. The next
+    # and any caller-supplied turn reminders (e.g. memory index) so the model
+    # sees current state without it entering the durable history. The next
     # LoopState is assembled from the CLEAN state_messages below (no reminder leak).
-    api_input_messages = list(state_messages)
-    if state.todos:
-        api_input_messages = with_todo_reminder(api_input_messages, state.todos)
+    reminder_texts = [render_todo_reminder(state.todos)] if state.todos else []
+    reminder_texts.extend(turn_reminders or [])
+    api_input_messages = with_turn_reminders(list(state_messages), reminder_texts)
 
     # Assemble the full system prompt for this turn.
     full_system_prompt = assemble_system_prompt(system_prompt)
