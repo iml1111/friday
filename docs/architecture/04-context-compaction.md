@@ -38,7 +38,7 @@ step() → ContextOverflowError raise
 
 ### COMPACT_PROMPT 보존 항목
 
-`context/compact.py:22`의 `COMPACT_PROMPT`는 LLM에게 다음 9개 항목을 요약 안에 보존하도록 지시한다:
+`context/compact.py:26`의 `COMPACT_PROMPT`는 LLM에게 다음 9개 항목을 요약 안에 보존하도록 지시한다:
 
 1. Primary Request and Intent (주요 요청·의도)
 2. Key Technical Concepts (핵심 기술 개념)
@@ -59,7 +59,7 @@ step() → ContextOverflowError raise
 ### `engine.compact(state) -> LoopState`
 
 ```python
-# core/engine.py:116
+# core/engine.py:134
 async def compact(self, state: LoopState) -> LoopState:
 ```
 
@@ -70,7 +70,7 @@ async def compact(self, state: LoopState) -> LoopState:
 ### `compact_conversation()` — 직접 사용 시
 
 ```python
-# context/compact.py:80
+# context/compact.py:90
 async def compact_conversation(
     *,
     provider: LLMProvider,
@@ -97,10 +97,10 @@ async def compact_conversation(
 
 ## ⑥ 유지보수 주의점
 
-- **`tools=[]` 필수**: `compact_conversation()` 내 `provider.complete()` 호출은 반드시 `tools=[]`여야 한다(`context/compact.py:114`). 요약 중 도구 호출이 허용되면 tool_use↔tool_result 쌍 정합성이 깨질 수 있다.
-- **`is_compact_summary=True` 플래그**: `create_compact_summary_message()`가 생성하는 user 메시지는 `is_compact_summary=True`로 표시된다(`context/compact.py:70-73`). 이 플래그는 [05-messages](05-messages.md)의 메시지 유형 분류와 연동되며, 제거하거나 누락하면 메시지 필터링 로직이 요약 메시지를 일반 사용자 메시지로 오분류할 수 있다.
-- **`turn_count` 보존**: `engine.compact()`는 `LoopState(messages=[summary_message], turn_count=state.turn_count)`로 반환한다(`core/engine.py:132`). 축소 후 `turn_count`가 리셋되지 않아야 관측 지표가 유지된다.
-- **`<summary>` 태그 폴백**: `<summary>` 태그가 없으면 전체 응답 텍스트를 그대로 사용한다(`context/compact.py:128-129`). LLM이 포맷을 어기더라도 루프가 중단되지 않도록 설계된 방어 코드다. 포맷 준수율이 낮아지면 요약 품질 저하로 이어지므로 프롬프트 수정 시 주의한다.
+- **`tools=[]` 필수**: `compact_conversation()` 내 `provider.complete()` 호출은 반드시 `tools=[]`여야 한다(`context/compact.py:116`). 요약 중 도구 호출이 허용되면 tool_use↔tool_result 쌍 정합성이 깨질 수 있다.
+- **`is_compact_summary=True` 플래그**: `create_compact_summary_message()`가 생성하는 user 메시지는 `is_compact_summary=True`로 표시된다(`context/compact.py:83`). 이 플래그는 [05-messages](05-messages.md)의 메시지 유형 분류와 연동되며, 제거하거나 누락하면 메시지 필터링 로직이 요약 메시지를 일반 사용자 메시지로 오분류할 수 있다.
+- **`turn_count` 보존**: `engine.compact()`는 `LoopState(messages=[summary_message], turn_count=state.turn_count)`로 반환한다(`core/engine.py:151`). 축소 후 `turn_count`가 리셋되지 않아야 관측 지표가 유지된다.
+- **`<summary>` 태그 폴백**: `<summary>` 태그가 없으면 전체 응답 텍스트를 그대로 사용한다(`context/compact.py:130-131`). LLM이 포맷을 어기더라도 루프가 중단되지 않도록 설계된 방어 코드다. 포맷 준수율이 낮아지면 요약 품질 저하로 이어지므로 프롬프트 수정 시 주의한다.
 - **요약기 system 분리**: 요약 호출의 system은 전용 `SUMMARIZER_SYSTEM_PROMPT`(`context/compact.py`)다. `engine.compact()`는 호출자 도메인 role을 요약 호출에 넘기지 않는다(요약은 "요약" 작업이 본질).
 - **재개(continuation) 프레이밍**: `create_compact_summary_message()`는 요약을 "이전 대화 이어받기" 프리앰블 + "곧장 재개, 추가 질문 금지" 지시로 감싼다. 컴팩션 후 재개를 매끄럽게 하기 위한 것으로, 본문 변경 시 재개 동작에 영향을 준다.
 

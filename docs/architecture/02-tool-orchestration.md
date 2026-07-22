@@ -29,7 +29,7 @@
 
 ### 파티셔닝 (`partition_tool_calls`)
 
-`orchestrator.py:68` — `blocks: list[ContentBlock]`를 받아 `list[Batch]`를 반환한다.
+`orchestrator.py:67` — `blocks: list[ContentBlock]`를 받아 `list[Batch]`를 반환한다.
 
 ```
 [RO, RO, RO, MUT, RO, RO]
@@ -41,19 +41,19 @@
 
 **병합 규칙**: 연속된 concurrency-safe 블록은 하나의 병렬 배치로 합쳐진다. non-safe 블록은 항상 독립 배치가 된다.
 
-**보수적 fallback** (`orchestrator.py:41–65`): 다음 중 하나라도 해당하면 non-safe로 처리한다.
+**보수적 fallback** (`orchestrator.py:40–64`): 다음 중 하나라도 해당하면 non-safe로 처리한다.
 - 도구를 찾을 수 없음 (unknown tool)
 - 입력이 `None`
 - Pydantic 스키마 검증 실패
 - `is_concurrency_safe()` 자체에서 예외 발생
 
-**concurrency-safe 판정**: 병렬 배치 여부는 **`is_concurrency_safe()` 하나만으로 결정된다**. `_is_concurrency_safe()` (`orchestrator.py:41–65`)는 스키마 검증 통과 후 `tool.is_concurrency_safe()`만 호출한다(`orchestrator.py:63`). 즉 `is_concurrency_safe() → True`만 반환하면 병렬 대상이 된다. 기본값은 `False`이므로 명시적 오버라이드 없이는 순차 실행된다.
+**concurrency-safe 판정**: 병렬 배치 여부는 **`is_concurrency_safe()` 하나만으로 결정된다**. `_is_concurrency_safe()` (`orchestrator.py:40–64`)는 스키마 검증 통과 후 `tool.is_concurrency_safe()`만 호출한다(`orchestrator.py:62`). 즉 `is_concurrency_safe() → True`만 반환하면 병렬 대상이 된다. 기본값은 `False`이므로 명시적 오버라이드 없이는 순차 실행된다.
 
 ---
 
 ### 실행 경로 — `run_tools`
 
-`orchestrator.py:145` / `core/loop.py:40,216` — `run_one_turn()`이 직접 호출하는 유일한 실행 경로다.
+`orchestrator.py:144` / `core/loop.py:39,262` — `run_one_turn()`이 직접 호출하는 유일한 실행 경로다.
 
 ```python
 # core/loop.py
@@ -125,13 +125,13 @@ class WeatherTool(Tool):
         return ToolResult(data=f"{parsed.city}: 맑음, 22°C")
 ```
 
-병렬 배치 대상이 되려면 `is_concurrency_safe()`가 `True`를 반환하면 된다 — 파티셔닝(`_is_concurrency_safe`, `orchestrator.py:41–65`)이 이 술어 하나만 참조한다.
+병렬 배치 대상이 되려면 `is_concurrency_safe()`가 `True`를 반환하면 된다 — 파티셔닝(`_is_concurrency_safe`, `orchestrator.py:40–64`)이 이 술어 하나만 참조한다.
 
 ---
 
 ### `Tool` 메서드 — 보수적 기본값
 
-`tools/base.py:51`
+`tools/base.py:139`
 
 | 메서드 | 반환 타입 | 기본값 | 설명 |
 |---|---|---|---|
@@ -143,7 +143,7 @@ class WeatherTool(Tool):
 
 ### `ToolResult`
 
-`tools/base.py:20`
+`tools/base.py:17`
 
 ```python
 ToolResult(
@@ -180,7 +180,7 @@ ToolResult(
 |---|---|---|
 | 사용함 | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | 사용함 | `pydantic` | 입력 스키마 검증 (`model_validate`, `model_json_schema`) |
-| 호출됨 | `core/loop.py` | `run_tools`를 import·호출 (`loop.py:40,216`) |
+| 호출됨 | `core/loop.py` | `run_tools`를 import·호출 (`loop.py:39,262`) |
 
 ---
 
@@ -193,7 +193,7 @@ ToolResult(
 
 **`is_concurrency_safe` 보수적 기본값** — 새 도구를 작성하면 기본값이 `False`이므로 의도치 않게 병렬 배치가 형성되지 않는다. 병렬 실행을 원하면 `is_concurrency_safe()`를 명시적으로 `True`로 오버라이드해야 한다 — 파티셔닝은 이 술어 하나만 참조한다.
 
-**빌트인 도구 자동 등록** — `FridayAgent`는 `builtin_tools()`(`friday_agent/tools/builtin/__init__.py`)가 반환하는 도구(현재 `TodoWrite`)를 호출자 도구 뒤에 항상 병합한다. 이름이 겹치는 도구를 호출자가 넘기면 `__init__`에서 `ValueError`로 거부한다(중복 도구 이름은 LLM API가 거부하므로, 조용한 dedupe 대신 명시적 거부로 정합성을 지킨다). 주입은 엔진 경계에서만 일어나므로 오케스트레이터·루프는 도구 이름을 모른 채 유지된다. 또한 활성 `MemoryStore`의 `tools()`(기본 `memory_save`/`memory_read`/`memory_delete`)도 항상 등록되며, 호출자 도구가 빌트인 또는 메모리 도구 이름과 겹치면 `__init__`이 `ValueError`로 거부한다(전체 도구 이름 유일성 검사).
+**빌트인 도구 자동 등록** — `FridayAgent`는 `builtin_tools()`(`friday_agent/tools/builtin/__init__.py`)가 반환하는 도구(현재 `TodoWrite`)를 호출자 도구 뒤에 항상 병합한다. 이름이 겹치는 도구를 호출자가 넘기면 `__init__`에서 `ValueError`로 거부한다(중복 도구 이름은 LLM API가 거부하므로, 조용한 dedupe 대신 명시적 거부로 정합성을 지킨다). 주입은 엔진 경계에서만 일어나므로 오케스트레이터·루프는 도구 이름을 모른 채 유지된다. 또한 `memory=`로 store가 장착된 경우(opt-in) 그 `MemoryStore`의 `tools()`(기본 `memory_save`/`memory_read`/`memory_delete`)도 등록되며, 호출자 도구가 빌트인 또는 메모리 도구 이름과 겹치면 `__init__`이 `ValueError`로 거부한다(전체 도구 이름 유일성 검사).
 
 ---
 

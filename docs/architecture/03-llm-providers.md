@@ -94,7 +94,7 @@ LLMError (base)
 
 ### 시스템 프롬프트 조립 (prompts.py)
 
-`api/prompts.py:12` — `SystemPrompt(text)`는 `__str__`을 구현해 `LLMProvider.complete(system_prompt=str(sp))`에 직접 전달된다.
+`api/prompts.py:13` — `SystemPrompt(text)`는 `__str__`을 구현해 `LLMProvider.complete(system_prompt=str(sp))`에 직접 전달된다.
 
 - `assemble_system_prompt(system_prompt)` — `GENERAL_AGENT_GUIDANCE`·`TODO_GUIDANCE`를 base prompt **앞에** 주입한 뒤 `SystemPrompt`로 래핑한다(범용→구체: 도메인 규칙이 recency 우위). base가 비면 guidance만 반환.
 
@@ -106,12 +106,12 @@ LLMError (base)
 
 | 항목 | Anthropic (`api/anthropic_provider.py`) | OpenAI (`api/openai_provider.py`) |
 |---|---|---|
-| **tool 입력 파싱** | SDK가 `tool_use.input`을 dict로 pre-parse. 재파싱 금지 (`_normalize_block:232`) | `tool_calls[].function.arguments`가 JSON 문자열 → `json.loads` (`_parse_arguments:329`) |
-| **메시지 형식** | content-block 그대로 전달 | `tool_use`→`tool_calls`, `tool_result`→`{"role":"tool"}`, system→선두 메시지, thinking 드롭 (`_to_openai_messages:182`) |
-| **빈 tools** | 필드 자체 생략 (`_build_params:171`) | 동일 — 필드 자체 생략 (`_build_params:172`) |
-| **thinking** | `thinking_enabled=True` 시 `temperature` 미전송 (`_build_params:175`) | thinking 미지원 |
-| **오버플로 판정** | 400/413 + 메시지 시그널 검사 (`_is_context_overflow:316`) | 400/413 + `body.error.code=="context_length_exceeded"` 또는 메시지 검사 (`_is_context_overflow:403`) |
-| **stop_reason 미매핑** | `END_TURN` 폴백 (`_map_stop_reason:258`) | `END_TURN` 폴백 (`_map_stop_reason:347`) |
+| **tool 입력 파싱** | SDK가 `tool_use.input`을 dict로 pre-parse. 재파싱 금지 (`_normalize_block:234`) | `tool_calls[].function.arguments`가 JSON 문자열 → `json.loads` (`_parse_arguments:279`) |
+| **메시지 형식** | content-block 그대로 전달 | `tool_use`→`tool_calls`, `tool_result`→`{"role":"tool"}`, system→선두 메시지, thinking 드롭 (`_to_openai_messages:152`) |
+| **빈 tools** | 필드 자체 생략 (`_build_params:144`) | 동일 — 필드 자체 생략 (`_build_params:142`) |
+| **thinking** | `thinking_enabled=True` 시 `temperature` 미전송 (`_build_params:148`) | thinking 미지원 |
+| **오버플로 판정** | 400/413 + 메시지 시그널 검사 (`_is_context_overflow:318`) | 400/413 + `body.error.code=="context_length_exceeded"` 또는 메시지 검사 (`_is_context_overflow:353`) |
+| **stop_reason 미매핑** | `END_TURN` 폴백 (`_map_stop_reason:260`) | `END_TURN` 폴백 (`_map_stop_reason:297`) |
 | **프롬프트 캐싱** | always-on. `_apply_cache_control`이 마지막 system 블록(=tools+system) + 마지막/끝-2 메시지의 마지막 **영속** 블록(트레일링 `<system-reminder>` 리마인더 스킵)에 `cache_control:{ephemeral}` 배치 | 자동(요청측 opt-in 없음). `_extract_usage`가 `prompt_tokens_details.cached_tokens` 판독 |
 
 ---
@@ -142,11 +142,11 @@ core/engine.py       → provider.config_type 검증
 
 다음 불변 조건은 어댑터를 수정할 때 반드시 유지해야 한다. 자세한 목록은 [06-invariants](06-invariants.md) 참조.
 
-1. **thinking 시 temperature 금지** — `AnthropicConfig.thinking_enabled=True`이면 `temperature` 파라미터를 API에 전송하면 안 된다 (`anthropic_provider.py:175–181`).
+1. **thinking 시 temperature 금지** — `AnthropicConfig.thinking_enabled=True`이면 `temperature` 파라미터를 API에 전송하면 안 된다 (`anthropic_provider.py:148–154`).
 2. **빈 tools 생략** — `tools=[]`를 API에 보내면 일부 모델에서 요청 거부. 두 어댑터 모두 빈 리스트일 때 `tools` 필드를 생략한다.
 3. **`ContextOverflowError` 전파** — 어댑터가 400을 판정해 raise하면, `core/loop.py`가 이를 잡지 않고 호출자에게 전파한다. 호출자는 `engine.compact(state)` 후 재시도한다. 컨텍스트 compaction 흐름은 [04-context-compaction](04-context-compaction.md) 참조.
 4. **OpenAI 인수 파싱** — `_parse_arguments`는 JSON 파싱 실패 시 빈 dict `{}`를 반환한다. 어댑터를 수정할 때 파싱 예외를 루프 밖으로 누출하지 않도록 주의.
-5. **프롬프트 캐싱 always-on** — `_apply_cache_control`이 매 호출 `cache_control:{ephemeral}`을 마지막 system 블록과 마지막/끝-2 메시지의 마지막 **영속** 블록에 배치한다(시스템+도구 프리픽스 + 대화 히스토리). 트레일링 turn-local 리마인더(`<system-reminder>` 블록)는 breakpoint 선정에서 스킵한다 — 다음 호출에 그 자리에서 사라지는 비영속 블록이라, 여기에 찍힌 breakpoint의 캐시 엔트리는 한 번도 적중하지 못하고 직전 턴의 신규 tool_result가 다음 호출에 한 번 더 캐시 쓰기된다(실측 세션 캐시 쓰기 ~35% 낭비). 스킵된 리마인더는 breakpoint 뒤의 일반 입력(1×)으로 과금된다. 전부 리마인더인 메시지는 마크를 생략한다(`messages[-2]` 앵커가 커버). 프리픽스가 바이트 단위로 안정해야 적중하며, 모델별 최소 캐시 크기(Opus/Haiku 4.x=4096, Sonnet 4.6=2048 토큰) 미만이면 마커는 무해하고 `cache_creation=0`. 4-breakpoint 한도·20-block lookback 제약이 있다. `messages[-2]`를 안정 앵커로 쓰는 이유는 턴별 todo 리마인더가 `messages[-1]`에만 붙기 때문. config 노브는 없다(OpenAI의 불가피한 자동 캐싱과 always-on 빌트인 정책에 정렬).
+5. **프롬프트 캐싱 always-on** — `_apply_cache_control`이 매 호출 `cache_control:{ephemeral}`을 마지막 system 블록과 마지막/끝-2 메시지의 마지막 **영속** 블록에 배치한다(시스템+도구 프리픽스 + 대화 히스토리). 트레일링 turn-local 리마인더(`<system-reminder>` 블록)는 breakpoint 선정에서 스킵한다 — 다음 호출에 그 자리에서 사라지는 비영속 블록이라, 여기에 찍힌 breakpoint의 캐시 엔트리는 한 번도 적중하지 못하고 직전 턴의 신규 tool_result가 다음 호출에 한 번 더 캐시 쓰기된다(실측 세션 캐시 쓰기 ~35% 낭비). 스킵된 리마인더는 breakpoint 뒤의 일반 입력(1×)으로 과금된다. 전부 리마인더인 메시지는 마크를 생략한다(`messages[-2]` 앵커가 커버). 프리픽스가 바이트 단위로 안정해야 적중하며, 모델별 최소 캐시 크기(Opus/Haiku 4.x=4096, Sonnet 4.6=2048 토큰) 미만이면 마커는 무해하고 `cache_creation=0`. 4-breakpoint 한도·20-block lookback 제약이 있다. `messages[-2]`를 안정 앵커로 쓰는 이유는 턴별 리마인더(todo·메모리 인덱스)가 `messages[-1]`에만 붙기 때문. config 노브는 없다(OpenAI의 불가피한 자동 캐싱과 always-on 빌트인 정책에 정렬).
 
 ---
 

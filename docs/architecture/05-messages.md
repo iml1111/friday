@@ -37,7 +37,7 @@
 
 ---
 
-### `Message` — `messages/types.py:20`
+### `Message` — `messages/types.py:48`
 
 루프가 `state.messages` 리스트로 관리하는 내부 대화 단위다.
 
@@ -55,7 +55,7 @@
 
 ### 생성 헬퍼
 
-#### `create_user_message()` — `messages/types.py:30`
+#### `create_user_message()` — `messages/types.py:81`
 
 ```python
 def create_user_message(
@@ -69,7 +69,7 @@ def create_user_message(
 - `content`가 `str`이면 `ContentBlock(type="text", text=content)` 한 개로 자동 래핑한다.
 - `type="user"`, `role="user"`로 고정.
 
-#### `create_tool_result_message()` — `messages/types.py:47`
+#### `create_tool_result_message()` — `messages/types.py:98`
 
 ```python
 def create_tool_result_message(
@@ -118,8 +118,8 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 
 | 심볼 | 위치 | 역할 |
 |---|---|---|
-| `create_user_message()` | `messages/types.py:30` | 사용자 입력·메타 메시지 생성 |
-| `create_tool_result_message()` | `messages/types.py:47` | 도구 결과 메시지 생성 |
+| `create_user_message()` | `messages/types.py:81` | 사용자 입력·메타 메시지 생성 |
+| `create_tool_result_message()` | `messages/types.py:98` | 도구 결과 메시지 생성 |
 | `normalize_for_api()` | `messages/normalize.py:6` | API 전송 직전 변환 |
 
 ---
@@ -144,7 +144,7 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 
 - **role 교대 규칙**: `tool_result` 메시지는 반드시 `role="user"`여야 하고, 대화의 첫 메시지도 user여야 한다. `create_tool_result_message()`가 이를 강제한다. 위반 시 API가 요청을 거부한다. 상세 규칙은 [06-invariants](06-invariants.md) 참조.
 - **thinking verbatim 에코**: `normalize_for_api()`의 `thinking` 블록 변환은 절대 생략하거나 변형해서는 안 된다. 누락 시 API 턴이 깨진다([06-invariants](06-invariants.md)).
-- **tool_result `<tool_use_error>` 래핑**: `create_tool_result_message(is_error=True)`는 `content` 텍스트를 `<tool_use_error>...</tool_use_error>`로 래핑한다(`messages/types.py:58`). LLM이 에러 컨텍스트를 인식하도록 하는 규약이므로 임의로 태그를 바꾸지 않는다.
+- **tool_result `<tool_use_error>` 래핑**: `create_tool_result_message(is_error=True)`는 `content` 텍스트를 `<tool_use_error>...</tool_use_error>`로 래핑한다(`messages/types.py:109`). LLM이 에러 컨텍스트를 인식하도록 하는 규약이므로 임의로 태그를 바꾸지 않는다.
 - **`is_meta` 플래그 남용 금지**: `is_meta=True` 메시지는 `normalize_for_api()`에서 투명하게 제거된다. 루프 내부 합성 메시지 외에 사용하면 API에 전달해야 할 메시지가 누락될 수 있다.
 - **이름 충돌**: `messages/types.py`의 `ContentBlock`과 `api/provider.py`의 `ContentBlock`(Union 앨리어스)을 같은 파일에서 임포트하면 이름이 충돌한다. 필요 시 `as` 앨리어스로 구분한다.
 

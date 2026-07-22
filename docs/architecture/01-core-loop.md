@@ -27,7 +27,7 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 
 ## ③ 핵심 동작 — `run_one_turn()` 턴 라이프사이클
 
-`run_one_turn()`은 `friday_agent/core/loop.py:114`에 정의된 `AsyncGenerator`다. 한 턴 동안 생성된 모든 `Message`를 yield한 뒤, 마지막에 정확히 **sentinel 1개** (`Terminal` 또는 `LoopState`)를 yield하고 종료한다.
+`run_one_turn()`은 `friday_agent/core/loop.py:168`에 정의된 `AsyncGenerator`다. 한 턴 동안 생성된 모든 `Message`를 yield한 뒤, 마지막에 정확히 **sentinel 1개** (`Terminal` 또는 `LoopState`)를 yield하고 종료한다.
 
 ### 실행 순서
 
@@ -115,7 +115,7 @@ step(state) → ContextOverflowError 발생
 
 | 타입 | 정의 위치 | 역할 |
 |---|---|---|
-| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:39` | 직렬화 가능한 루프 이송 단위 + 턴 경계 "계속" 재개 sentinel |
+| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:34` | 직렬화 가능한 루프 이송 단위 + 턴 경계 "계속" 재개 sentinel |
 | `Terminal(reason, error=None)` | `core/state.py:19` | 루프 종료 sentinel |
 
 ---
