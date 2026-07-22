@@ -13,7 +13,12 @@ from typing import AsyncGenerator
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
-from friday_agent.memory.store import FileMemoryStore, MemoryStore, build_memory_section
+from friday_agent.memory.store import (
+    MEMORY_INSTRUCTIONS,
+    FileMemoryStore,
+    MemoryStore,
+    build_memory_reminder,
+)
 from friday_agent.core.loop import run_one_turn
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
@@ -97,15 +102,18 @@ class FridayAgent:
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
-        # Rebuilt every turn from the store. In the distributed model the caller
-        # reconstructs the engine each turn, so caching this would never be reused;
-        # rebuilding keeps single-process behavior identical (index fresh per turn).
-        memory_section = await build_memory_section(self._memory)
+        # Static/dynamic split: MEMORY_INSTRUCTIONS is session-stable, so it is
+        # safe in the cached system prefix. The live index changes on every
+        # memory_save/delete — in the system prompt it would invalidate the
+        # whole conversation cache, so it rides messages[-1] as a turn-local
+        # reminder instead (rebuilt each turn from the store: fresh in the
+        # distributed model where the caller reconstructs the engine per turn).
         effective_prompt = (
-            f"{self._system_prompt}\n\n{memory_section}"
+            f"{self._system_prompt}\n\n{MEMORY_INSTRUCTIONS}"
             if self._system_prompt
-            else memory_section
+            else MEMORY_INSTRUCTIONS
         )
+        turn_reminders = [await build_memory_reminder(self._memory)]
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(
             provider=self._provider,
@@ -115,6 +123,7 @@ class FridayAgent:
             system_prompt=effective_prompt,
             config=self._config,
             max_concurrency=self._max_concurrency,
+            turn_reminders=turn_reminders,
         ):
             yield item
 

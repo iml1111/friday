@@ -1,9 +1,9 @@
-"""Memory data model, MemoryStore ABC, FileMemoryStore backend, and prompt-section assembly.
+"""Memory data model, MemoryStore ABC, FileMemoryStore backend, and prompt assembly.
 
 MemoryStore is the persistence interface for agent memory; FileMemoryStore is the
-default single-file Markdown backend. This module also assembles the memory
-system-prompt section (static instructions + auto-generated index) the engine
-prepends each turn: MEMORY_INSTRUCTIONS, build_memory_section.
+default single-file Markdown backend. This module also assembles the memory prompt
+pieces: MEMORY_INSTRUCTIONS (static, joined into the system prompt) and
+build_memory_reminder (live index, injected as a turn-local <system-reminder>).
 """
 from __future__ import annotations
 
@@ -202,55 +202,48 @@ class FileMemoryStore(MemoryStore):
         return entries
 
 
-# --- System-prompt section assembly --------------------------------------------
-# Static instructions + auto-generated index. build_memory_section() is async (it
-# reads the store's index); the engine builds it every turn and prepends it to the
-# base system prompt.
+# --- Prompt assembly ------------------------------------------------------------
+# Static instructions (MEMORY_INSTRUCTIONS — session-stable, safe in the system
+# cache prefix) vs. the live index (build_memory_reminder — changes on every
+# memory_save/delete, so it rides messages[-1] as a turn-local <system-reminder>;
+# putting it in the system prompt would invalidate the whole conversation cache).
 
 MEMORY_INSTRUCTIONS: str = """# Memory
-You have a persistent memory that survives across sessions, accumulated over time.
-Use the memory tools to save and recall typed facts.
+You have a persistent memory that survives across sessions. Use the memory tools
+to save and recall typed facts.
 
-## Types of memory
+## Types
  - user: who the user is (role, preferences, expertise).
  - feedback: how the user wants you to work (corrections, confirmed approaches). Include the why.
  - project: ongoing work/goals/constraints not derivable from code or git.
  - reference: pointers to external resources (URLs, dashboards, tickets).
 
-## When to save
-Save when you learn a durable fact in one of the four types. For feedback/project,
-structure the body as the rule/fact, then **Why:** and **How to apply:** lines.
-Reuse an existing name to UPDATE rather than duplicate.
+## Rules
+ - Save when you learn a durable fact of one of these types. For feedback/project,
+   structure the body as the rule/fact, then **Why:** and **How to apply:** lines.
+ - Reuse an existing name to UPDATE rather than duplicate; the moment a memory
+   proves wrong or outdated, re-save it corrected or memory_delete it.
+ - Do NOT save what is derivable (code structure, architecture, git history),
+   one-off fixes, or ephemeral conversation/run state.
+ - Before relying on a memory that names a file/function/flag, verify it still
+   exists. If the user says to ignore memory, act as if it were empty.
 
-## When to correct
-If a saved memory becomes wrong or outdated, fix it the moment you notice — re-save
-with the same name to UPDATE it, or use memory_delete to remove it. Never leave a
-known-false memory in place.
-
-## What NOT to save
-Do not save what is derivable (code structure, architecture, git history), one-off
-debugging fixes, or ephemeral conversation/run state.
-
-## When to access
-Read a memory when it is relevant or the user asks. If a memory names a file,
-function, or flag, verify it still exists before relying on it — a memory saying X
-does not guarantee X exists now (if it no longer holds, correct it per "When to
-correct"). If the user says to ignore memory, act as if empty.
-
-The memory index below is rebuilt each turn from your saved memories; a memory you
-save appears in your tool_result immediately and in the index from the next turn on."""
+Your current memory index arrives each turn as a <system-reminder> block near the
+end of the conversation, rebuilt from your saved memories (a new save appears in
+the index from the next turn on). No index block = empty memory — save memories
+as you learn about the user, their feedback, and the project."""
 
 
-async def build_memory_section(store: MemoryStore) -> str:
-    """Assemble the always-injected memory section: instructions then live index."""
+async def build_memory_reminder(store: MemoryStore) -> str:
+    """Render the live memory index as a turn-local <system-reminder> block.
+    Empty store -> '' (the empty-state nudge lives in MEMORY_INSTRUCTIONS)."""
     entries = await store.load_index()
-    if entries:
-        lines = "\n".join(f"- [{e.type.value}] {e.name} — {e.description}" for e in entries)
-        index = f"## Current memory index\n{lines}"
-    else:
-        index = (
-            "## Current memory index\n"
-            "Your memory is empty. Save memories as you learn about the user, "
-            "their feedback, and the project."
-        )
-    return f"{MEMORY_INSTRUCTIONS}\n\n{index}"
+    if not entries:
+        return ""
+    lines = "\n".join(f"- [{e.type.value}] {e.name} — {e.description}" for e in entries)
+    return (
+        "<system-reminder>\n"
+        "Current memory index (rebuilt each turn from your saved memories):\n"
+        f"{lines}\n"
+        "</system-reminder>"
+    )

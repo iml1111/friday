@@ -1,4 +1,4 @@
-"""Tests for friday_agent/memory/store.py — data model + prompt-section assembly."""
+"""Tests for friday_agent/memory/store.py — data model + prompt assembly."""
 import pytest
 
 from friday_agent.memory.store import (
@@ -6,7 +6,7 @@ from friday_agent.memory.store import (
     IndexEntry,
     MemoryEntry,
     MemoryType,
-    build_memory_section,
+    build_memory_reminder,
 )
 from tests.fakes import InMemoryStore
 
@@ -74,36 +74,43 @@ def test_public_reexports_available():
         "MemoryStore", "FileMemoryStore",
         "MemoryEntry", "IndexEntry", "MemoryType",
         "MemorySave", "MemoryRead", "MemoryDelete",
-        "build_memory_section",
+        "build_memory_reminder",
     ):
         assert hasattr(m, sym), f"friday_agent.memory should re-export {sym}"
 
 
-# --- Prompt-section assembly (MEMORY_INSTRUCTIONS + auto index) -----------------
+# --- Prompt assembly: static instructions vs turn-local index reminder ----------
+# MEMORY_INSTRUCTIONS is session-stable -> safe in the cached system prefix.
+# The live index changes on every memory_save/delete, so it rides messages[-1]
+# as a <system-reminder>; putting it in the system prompt would invalidate the
+# whole conversation cache.
 
 @pytest.mark.asyncio
-async def test_build_section_lists_each_entry_as_type_name_description():
+async def test_reminder_renders_index_in_system_reminder_block():
     store = InMemoryStore()
     await store.save(MemoryEntry(name="user-role", description="backend eng", type=MemoryType.user, body="B"))
     await store.save(MemoryEntry(name="testing-policy", description="real DB", type=MemoryType.feedback, body="B"))
-    out = await build_memory_section(store)
+    out = await build_memory_reminder(store)
+    assert out.startswith("<system-reminder>")
+    assert out.rstrip().endswith("</system-reminder>")
     assert "[user] user-role — backend eng" in out
     assert "[feedback] testing-policy — real DB" in out
 
 
 @pytest.mark.asyncio
-async def test_build_section_empty_store_contains_instructions_then_empty_index():
-    out = await build_memory_section(InMemoryStore())
-    assert out.startswith(MEMORY_INSTRUCTIONS)
-    assert "empty" in out.lower()
-    # Static instructions precede the dynamic index.
-    assert out.index(MEMORY_INSTRUCTIONS) < out.lower().index("empty")
+async def test_reminder_empty_store_returns_empty_string():
+    out = await build_memory_reminder(InMemoryStore())
+    assert out == ""
 
 
-@pytest.mark.asyncio
-async def test_build_section_reflects_saved_entries():
-    store = InMemoryStore()
-    await store.save(MemoryEntry(name="user-role", description="backend eng", type=MemoryType.user, body="B"))
-    out = await build_memory_section(store)
-    assert "[user] user-role — backend eng" in out
-    assert MEMORY_INSTRUCTIONS in out
+def test_instructions_reference_reminder_location():
+    # The instructions must point at the index's new home (a <system-reminder>
+    # block near the end of the conversation), not claim it sits "below".
+    assert "system-reminder" in MEMORY_INSTRUCTIONS
+    assert "below" not in MEMORY_INSTRUCTIONS
+
+
+def test_instructions_carry_empty_state_nudge():
+    # The empty-state nudge lives in the static instructions: an empty store
+    # emits no reminder block at all, so "no block" must be interpretable.
+    assert "empty" in MEMORY_INSTRUCTIONS
