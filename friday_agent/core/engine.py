@@ -15,7 +15,6 @@ from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
-    FileMemoryStore,
     MemoryStore,
     build_memory_reminder,
 )
@@ -44,6 +43,10 @@ class FridayAgent:
                 Defaults to the provider's default config (provider.config_type())
                 when None.
         max_concurrency: Maximum concurrent tool executions (default 10).
+        memory: Optional MemoryStore. When None (the default), the memory
+                subsystem is not mounted: no memory tools, no MEMORY_INSTRUCTIONS
+                system section, no per-turn index reminder. Pass a store
+                (e.g. FileMemoryStore()) to opt in.
         system_sections: Async callables returning a string, appended in order
                 after the caller's domain prompt each turn. Sections returning
                 an empty string are filtered out. Default is an empty list —
@@ -84,15 +87,16 @@ class FridayAgent:
                 f"{type(config).__name__}. Match the config type to the model vendor."
             )
 
-        self._memory = memory if memory is not None else FileMemoryStore()
+        self._memory = memory
         caller_tools = tools if tools is not None else []
-        assembled = [*caller_tools, *builtin_tools(), *self._memory.tools()]
+        memory_tools = self._memory.tools() if self._memory is not None else []
+        assembled = [*caller_tools, *builtin_tools(), *memory_tools]
         dups = sorted(n for n, c in Counter(t.name for t in assembled).items() if c > 1)
         if dups:
             raise ValueError(
-                f"FridayAgent: duplicate tool names {dups}. TodoWrite and the "
-                f"active MemoryStore's tools are SDK-managed and always registered; remove "
-                f"the colliding tool(s) or override the store's tools()."
+                f"FridayAgent: duplicate tool names {dups}. TodoWrite (and the "
+                f"mounted MemoryStore's tools, when memory is passed) are SDK-managed; "
+                f"remove the colliding tool(s) or override the store's tools()."
             )
         self._provider = provider
         self._tools = assembled
@@ -126,9 +130,12 @@ class FridayAgent:
         # every turn and rides messages[-1] as turn-local reminders instead —
         # in the system prompt it would invalidate the whole conversation cache.
         extra_sections = [await build() for build in self._system_sections]
-        parts = [p for p in (MEMORY_INSTRUCTIONS, self._system_prompt, *extra_sections) if p]
+        memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
+        parts = [p for p in (memory_section, self._system_prompt, *extra_sections) if p]
         effective_prompt = "\n\n".join(parts)
-        turn_reminders = [await build_memory_reminder(self._memory)]
+        turn_reminders = (
+            [await build_memory_reminder(self._memory)] if self._memory is not None else []
+        )
         turn_reminders.extend([await build() for build in self._turn_sections])
         turn_reminders = [t for t in turn_reminders if t]
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]

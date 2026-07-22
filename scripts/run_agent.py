@@ -26,10 +26,11 @@ TodoWrite; the tracked list is re-injected into every turn's API view as a
 LoopState.todos). The live list is printed under a "── todo list ──" header whenever
 it changes so you can watch progress.
 
-Memory is always-on too: FridayAgent registers memory_save / memory_read /
-memory_delete from a default FileMemoryStore, which persists to FRIDAY_MEMORY.md in
-the working directory across runs. Inject your own MemoryStore (FridayAgent(...,
-memory=YourStore())) to replace the backend and its tools.
+Memory is opt-in: this example mounts a FileMemoryStore explicitly
+(FridayAgent(..., memory=FileMemoryStore())), which registers memory_save /
+memory_read / memory_delete and persists to FRIDAY_MEMORY.md in the working
+directory across runs. Omit the memory argument to run without the subsystem,
+or pass your own MemoryStore to replace the backend and its tools.
 
 Cost guardrail: max_tokens=1024; caller-side turn cap = 30 per input to limit spend.
 """
@@ -48,6 +49,7 @@ from _env import create_config, create_provider, resolve_api_key
 from friday_agent.api.provider import ContextOverflowError
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
+from friday_agent.memory.store import FileMemoryStore
 from friday_agent.messages.types import Message, create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
 
@@ -94,9 +96,10 @@ async def main() -> int:
         tools=[ExampleTool()],   # TodoWrite is auto-registered by FridayAgent (built-in)
         system_prompt=_SYSTEM_PROMPT,
         config=create_config(_MODEL, max_tokens=_MAX_TOKENS),
+        memory=FileMemoryStore(),  # opt-in: persists to FRIDAY_MEMORY.md across runs
     )
 
-    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite + memory_* are built-in)")
+    print(f"friday-agent local example — model={_MODEL}  (tools: ExampleTool; TodoWrite built-in, memory_* mounted)")
     print("Enter a prompt. To quit: exit / quit / Ctrl-D\n")
 
     history: list[Message] = []

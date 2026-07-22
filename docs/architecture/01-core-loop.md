@@ -76,7 +76,7 @@ FridayAgent(
     system_prompt="",
     config=None,           # 미지정 시 provider.config_type() 기본값
     max_concurrency=10,
-    memory=None,           # MemoryStore — 미지정 시 기본 FileMemoryStore(); store가 곧 도구 표면
+    memory=None,           # MemoryStore — 미지정 시 메모리 서브시스템 미장착(opt-in); store가 곧 도구 표면
     system_sections=None,  # list[async () -> str] — 정적 섹션, 도메인 프롬프트 뒤 system에 합류 (byte-stable 계약)
     turn_sections=None,    # list[async () -> str] — 동적 콘텐츠, 매 턴 turn-local 리마인더로 messages[-1]에
 )
@@ -140,7 +140,7 @@ step(state) → ContextOverflowError 발생
 - **컨텍스트 윈도우 관리는 호출자 책임.** `step()`은 `state.messages`를 그대로 API에 전송한다. 토큰 예산을 초과하면 `ContextOverflowError`를 던지므로, 호출자가 `engine.compact(state)`로 축소 후 재시도해야 한다.
 - **범용 행동블록 자동 주입.** `run_one_turn()`은 `GENERAL_AGENT_GUIDANCE`(프롬프트 인젝션 플래깅·`<system-reminder>` 의미·행동의 가역성·간결성 등)를 호출자 `system_prompt` **앞에 항상** 주입해 전송한다 (`assemble_system_prompt()`). 순서는 범용→구체 — 도메인 프롬프트가 마지막에 와서 그 규칙이 recency 우위로 범용 지침을 오버라이드한다. opt-out 플래그는 없다. 컴팩션 요약 호출(`engine.compact()`)은 이 경로를 거치지 않으므로 범용블록이 요약에 섞이지 않는다.
 - **TodoWrite 도구·가이던스 자동 주입(빌트인).** `FridayAgent`는 `builtin_tools()`(`tools/builtin/__init__.py`)의 도구를 호출자 도구에 항상 병합하고, `assemble_system_prompt()`가 `TODO_GUIDANCE`를 항상 덧붙인다(opt-out 없음). 호출자가 빌트인과 같은 이름의 도구를 주입하면 `FridayAgent.__init__`이 `ValueError`로 거부한다. 컴팩션 요약은 이 프롬프트 경로를 거치지 않으므로 `TODO_GUIDANCE`가 요약에 섞이지 않는다.
-- **메모리 프롬프트 주입(빌트인, 정적/동적 분리).** `engine.step()`이 정적 지침 `MEMORY_INSTRUCTIONS`는 base 시스템 프롬프트 앞에(범용→구체, 세션 내 byte-stable), 라이브 인덱스는 매 턴 `build_memory_reminder(self._memory)`로 렌더해 turn-local 리마인더(`turn_reminders` 경로)로 `messages[-1]`에만 싣는다. `compact()`는 이 경로를 거치지 않아 메모리 인덱스가 요약에 새지 않는다. `MemoryStore`는 `LoopState`에 직렬화되지 않으므로(컨테이너-로컬 재주입) 분산 재개 serde는 불변이다. 프롬프트 캐싱(always-on) 관점: `memory_save`/`delete`가 인덱스를 바꿔도 system 프리픽스·대화 히스토리 캐시는 살아남는다 — 변하는 것은 breakpoint 밖 리마인더 블록뿐(인덱스를 system에 두면 저장 1회가 대화 전체 캐시를 무효화한다). 기본 store는 `FileMemoryStore`이며 `FridayAgent(..., memory=...)`로 교체한다. 상세는 [08-memory](08-memory.md) 참조.
+- **메모리 프롬프트 주입(opt-in, 정적/동적 분리).** `memory=` store가 장착된 경우에만: `engine.step()`이 정적 지침 `MEMORY_INSTRUCTIONS`는 base 시스템 프롬프트 앞에(범용→구체, 세션 내 byte-stable), 라이브 인덱스는 매 턴 `build_memory_reminder(self._memory)`로 렌더해 turn-local 리마인더(`turn_reminders` 경로)로 `messages[-1]`에만 싣는다. `memory=None`(기본)이면 이 경로 전체가 생략된다. `compact()`는 이 경로를 거치지 않아 메모리 인덱스가 요약에 새지 않는다. `MemoryStore`는 `LoopState`에 직렬화되지 않으므로(컨테이너-로컬 재주입) 분산 재개 serde는 불변이다. 프롬프트 캐싱(always-on) 관점: `memory_save`/`delete`가 인덱스를 바꿔도 system 프리픽스·대화 히스토리 캐시는 살아남는다 — 변하는 것은 breakpoint 밖 리마인더 블록뿐(인덱스를 system에 두면 저장 1회가 대화 전체 캐시를 무효화한다). 상세는 [08-memory](08-memory.md) 참조.
 - **`tool_use↔tool_result` 쌍 보존.** `LLMError` 경로에서 백필(`yield_missing_tool_result_blocks`)이 작동해 LLM API 거부를 방지한다. 이 불변식이 깨지면 다음 API 호출이 즉시 실패한다. 상세는 [06-invariants](06-invariants.md) 참조.
 - **루프 상태는 깨끗한 턴 경계에서만 업데이트.** `LoopState`는 도구 결과가 모두 수집된 뒤에만 yield되므로, 직렬화·재개 시 중간 상태가 누락되지 않는다.
 - **serde는 provider·config를 직렬화하지 않음.** `LoopState.to_dict()` / `LoopState.from_dict()`는 messages + turn_count + todos만 왕복한다. provider·config는 컨테이너 로컬 객체로 간주해 재개 시 다시 주입한다.

@@ -136,7 +136,7 @@ async def main() -> int:
     print(f"\nmodel         : {model}")
     print(f"run nonce     : {_RUN_NONCE}")
     print(f"thinking      : {'ON (budget=' + str(think_budget) + ')' if thinking_on else 'OFF'}")
-    print(f"system prompt : {len(SYSTEM_PROMPT):,} chars (base; engine also appends guidance+memory)")
+    print(f"system prompt : {len(SYSTEM_PROMPT):,} chars (base; engine also appends guidance)")
     print("Driving 2 sequential turns over an identical system+tools prefix...\n")
 
     # Turn 1 — cold prefix (nothing cached yet for this nonce).

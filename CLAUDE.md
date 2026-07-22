@@ -25,7 +25,7 @@
 6. `05-messages.md` — 메시지/변환
 7. `06-invariants.md` — par-critical 불변식
 8. `07-data-models.md` — 전 데이터 모델 카탈로그
-9. `08-memory.md` — 영속 메모리 서브시스템(always-on, `MemoryStore` 교체)
+9. `08-memory.md` — 영속 메모리 서브시스템(opt-in, `MemoryStore` 주입)
 
 ## 아키텍처 큰 그림
 
@@ -76,7 +76,7 @@ engine.step(state)       ┌─ run_one_turn 1회 (비동기 제너레이터) �
 LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architecture/03-llm-providers.md`):
 - **`LLMProvider`** — 유일한 *필수* 교체 지점. completion 호출 + 응답을 `AssistantResponse`로 정규화.
 - **`ToolExecutor`** / **`ContextManager`** — 대부분 범용 (LLM 호출부만 교체).
-- **메모리는 별도 서브시스템**(LLM 경계 아님) — `friday_agent/memory/`의 `MemoryStore`(영속 + `tools()` 소유). always-on 빌트인이며 주입으로 교체. 상세: `docs/architecture/08-memory.md`.
+- **메모리는 별도 서브시스템**(LLM 경계 아님) — `friday_agent/memory/`의 `MemoryStore`(영속 + `tools()` 소유). opt-in(기본 미장착)이며 store 주입 시 장착. 상세: `docs/architecture/08-memory.md`.
 
 벤더 경계와 어댑터별 차이는 `docs/architecture/03-llm-providers.md`의 어댑터 차이 표 참조.
 
@@ -94,7 +94,7 @@ LLM 백엔드 교체는 **3개 인터페이스**로 한정된다 (`docs/architec
 - **Python 3.11+**, `anthropic` + `openai` SDK + `pydantic` + `anyio`.
 - API 키: **외부 주입 전용**(필수). 라이브러리는 환경변수를 읽지 않는다 — provider 생성 시 어댑터(`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`)에 직접 넘긴다. 키 해석(env→인자)과 모델 prefix(claude-/gpt-)→어댑터 라우팅은 모두 경계 계층 `scripts/_env.py`(`resolve_api_key(model)`·`create_provider(model, api_key=...)`·`create_config(model, ...)`)가 담당한다 — 라이브러리는 라우팅 팩토리를 제공하지 않는다. **`FridayAgent`은 provider를 직접 받는다(필수)** — model/api_key 인자는 없다. 공개 API 면: `engine.step(state)` (단일 턴 비동기 제너레이터 — Message들을 순서대로 yield하고 마지막에 `LoopState | Terminal` sentinel 1개를 yield) + `engine.compact(state)` (호출자 주도 compact). 호출 config는 벤더 config를 직접 입력한다(예: `AnthropicConfig(max_tokens=...)` 또는 `provider.config_type(max_tokens=...)`; 미지정 시 `provider.config_type()` 기본값). `context_window`·`max_output_tokens`는 어댑터 생성자, `max_concurrency`는 `FridayAgent(...)`. 호출자 확장 훅 `system_sections`(정적 섹션, byte-stable 계약)·`turn_sections`(동적 콘텐츠 → turn-local 리마인더)도 `FridayAgent(...)` 생성자로 주입한다(기본값이면 출력 무변화).
 - **빌트인 todo 항상-주입**: `TodoWrite` 도구와 todo 가이던스(`TODO_GUIDANCE`)는 항상 빌트인으로 자동 등록·주입된다(호출자 주입 불필요, opt-out 없음). 호출자가 같은 이름의 도구를 넘기면 `FridayAgent.__init__`이 `ValueError`로 거부한다.
-- **빌트인 memory 항상-주입**: 기본 `FileMemoryStore`(→`FRIDAY_MEMORY.md`)와 `memory_save`/`memory_read`/`memory_delete`가 항상 등록된다. 주입은 정적/동적 분리 — `MEMORY_INSTRUCTIONS`(정적 지침)는 `step()`에서 시스템 프롬프트에, 라이브 인덱스는 `build_memory_reminder`로 turn-local `<system-reminder>`(`messages[-1]` 전용, 비영속)로 실린다(캐시 프리픽스 보존). 호출자가 `FridayAgent(..., memory=MyStore())`로 주입하면 store와 도구가 통째로 대체된다. 코어 루프·`LoopState` serde는 불변(store는 컨테이너-로컬 재주입).
+- **memory는 opt-in**: `FridayAgent(memory=None)`(기본)이면 메모리 서브시스템 미장착 — 도구 3종(`memory_save`/`memory_read`/`memory_delete`)·지침·인덱스 리마인더 전부 없음. `FridayAgent(..., memory=FileMemoryStore())` 등 store를 명시 주입해야 장착된다(store가 곧 도구 표면). 장착 시 주입은 정적/동적 분리 — `MEMORY_INSTRUCTIONS`(정적 지침)는 `step()`에서 시스템 프롬프트에, 라이브 인덱스는 `build_memory_reminder`로 turn-local `<system-reminder>`(`messages[-1]` 전용, 비영속)로 실린다(캐시 프리픽스 보존). 코어 루프·`LoopState` serde는 불변(store는 컨테이너-로컬 재주입).
 - Phase 검증: 단일 도구(P1) → 병렬 도구 배치(P2) → `ContextOverflowError` → `engine.compact(state)` 호출자 복구(P3).
 
 ## 구현 시 핵심 함정
