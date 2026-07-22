@@ -157,13 +157,18 @@ ToolResult(
 
 ### `get_tool_schema()`
 
-`tools/base.py:80` — Pydantic v2 스키마에서 `$defs`를 인라인 전개해 제거하고 최상위 `title`을 제거한 뒤 API에 전달할 형태로 반환한다. 인라인(`_inline_defs`)은 중첩 모델·enum(예: `TodoItem.status`)이 댕글링 `$ref` 없이 모델에 그대로 노출되게 한다 — 안 그러면 `$ref`만 남아 모델이 enum 제약을 못 본다.
+`tools/base.py` — Pydantic v2 스키마를 와이어 다이어트 파이프라인으로 가공해 API에 전달할 형태로 반환한다. 스키마는 모든 호출의 프리픽스에 상주하므로, 모델에게 정보량이 0인 바이트를 제거한다(검증은 Pydantic 모델이 수행 — 이 스키마는 순수 "모델에게 보여주는 문서"라 의미 불변):
+
+1. **`_inline_defs`** — `$defs`를 인라인 전개해 제거. 중첩 모델·enum(예: `TodoItem.status`)이 댕글링 `$ref` 없이 모델에 그대로 노출되게 한다 — 안 그러면 `$ref`만 남아 모델이 enum 제약을 못 본다.
+2. **`_strip_titles`** — pydantic 자동 생성 cosmetic `title`을 재귀 제거(프로퍼티 이름이 이미 스키마에 있어 순수 중복). `title`이라는 이름의 실제 프로퍼티(dict 값)는 보존.
+3. **`_slim_wire_schema`** — `Optional[X] = None`의 3중 세리머니(`anyOf: [X, {type: null}]` + `default: null`)를 X로 접고 null default 제거("필수 아님"은 `required` 부재가 이미 전달). 비-null union·의미 있는 default는 보존. 중첩 description은 dedent.
+4. **description 우선순위** — `Tool.description` 클래스 속성이 모델 대면 설명이고, 미설정 시 docstring 폴백(하위호환). 개발자용 구현 노트가 docstring에 있어도 와이어로 유출되지 않는 분리 지점. `_dedent_text`로 소스 들여쓰기 제거.
 
 ```python
 {
     "name": self.name,
-    "description": "...",
-    "input_schema": { ... }  # 최상위 title 제거; $defs는 인라인 전개 후 제거
+    "description": _dedent_text(self.description or docstring),
+    "input_schema": { ... }  # title 재귀 제거 + Optional 접기; $defs는 인라인 전개 후 제거
 }
 ```
 
