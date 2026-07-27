@@ -53,7 +53,7 @@
 
 ### 실행 경로 — `run_tools`
 
-`orchestrator.py:144` / `core/loop.py:39,262` — `run_one_turn()`이 직접 호출하는 유일한 실행 경로다.
+`orchestrator.py:144` / `core/loop.py:40,261` — `run_one_turn()`이 직접 호출하는 유일한 실행 경로다.
 
 ```python
 # core/loop.py
@@ -180,7 +180,7 @@ ToolResult(
 |---|---|---|
 | 사용함 | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | 사용함 | `pydantic` | 입력 스키마 검증 (`model_validate`, `model_json_schema`) |
-| 호출됨 | `core/loop.py` | `run_tools`를 import·호출 (`loop.py:39,262`) |
+| 호출됨 | `core/loop.py` | `run_tools`를 import·호출 (`loop.py:40,261`) |
 
 ---
 

@@ -27,7 +27,7 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 
 ## ③ 핵심 동작 — `run_one_turn()` 턴 라이프사이클
 
-`run_one_turn()`은 `friday_agent/core/loop.py:168`에 정의된 `AsyncGenerator`다. 한 턴 동안 생성된 모든 `Message`를 yield한 뒤, 마지막에 정확히 **sentinel 1개** (`Terminal` 또는 `LoopState`)를 yield하고 종료한다.
+`run_one_turn()`은 `friday_agent/core/loop.py:167`에 정의된 `AsyncGenerator`다. 한 턴 동안 생성된 모든 `Message`를 yield한 뒤, 마지막에 정확히 **sentinel 1개** (`Terminal` 또는 `LoopState`)를 yield하고 종료한다.
 
 ### 실행 순서
 
@@ -61,7 +61,7 @@ while-true 드라이버는 존재하지 않는다. 호출자가 `step()`을 반�
 
 ### 백필 (`yield_missing_tool_result_blocks`)
 
-`LLMError`로 턴이 중단되면, 아직 결과를 받지 못한 tool_use 블록에 대해 `friday_agent/core/loop.py:75` › `yield_missing_tool_result_blocks()`가 합성 오류 `tool_result`를 생성해 정합성을 복구한다. 상세는 [06-invariants](06-invariants.md) 참조.
+`LLMError`로 턴이 중단되면, 아직 결과를 받지 못한 tool_use 블록에 대해 `friday_agent/core/loop.py:76` › `yield_missing_tool_result_blocks()`가 합성 오류 `tool_result`를 생성해 정합성을 복구한다. 상세는 [06-invariants](06-invariants.md) 참조.
 
 ---
 
@@ -77,12 +77,15 @@ FridayAgent(
     config=None,           # 미지정 시 provider.config_type() 기본값
     max_concurrency=10,
     memory=None,           # MemoryStore — 미지정 시 메모리 서브시스템 미장착(opt-in); store가 곧 도구 표면
+    compact_instructions="",  # compact() 요약 프롬프트에 끼울 도메인 요구사항; 빈 문자열이면 프롬프트 무변경
 )
 ```
 
 `config`가 `provider.config_type`과 타입이 다르면 즉시 `ValueError`를 발생시킨다.
 
 컨텍스트 주입 면은 의도적으로 단순하다: 정적 콘텐츠는 호출자가 `system_prompt` 문자열 하나로 넘긴다(여러 섹션은 호출자 쪽에서 `"\n\n".join(...)`으로 조합). 동적(턴별 가변) 콘텐츠 주입 표면은 엔진에 없다 — SDK 내부(todo·메모리 인덱스)만 turn-local 리마인더 기계(`run_one_turn`의 `turn_reminders`)를 사용한다.
+
+`system_prompt`는 **턴 루프 전용**이다 — `compact()`의 요약 호출은 전용 `SUMMARIZER_SYSTEM_PROMPT`로 돌기 때문에 이 프롬프트가 닿지 않는다. 요약이 무엇을 보존해야 하는지는 별도 문자열 `compact_instructions`로 지정한다 (상세: [04-context-compaction](04-context-compaction.md#도메인-지침-주입-슬롯-opt-in)).
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Terminal, None]`
 
