@@ -22,14 +22,20 @@ SUMMARIZER_SYSTEM_PROMPT: str = (
 # ---------------------------------------------------------------------------
 # Compact prompt
 # ---------------------------------------------------------------------------
-# Split into head (guards + section spec) and tail (output format + no-tools
-# reminder) so callers can inject domain requirements between them. The tail
-# must stay last: its REMINDER is what keeps the summarizer from burning its
-# single turn on a tool call, and recency is what makes it work.
+# Split into head (guards + section spec) and tail (output format reminder) so
+# callers can inject domain requirements between them. The tail must stay last:
+# it carries the <analysis>/<summary> output contract, and recency is what makes
+# the model honor it. Format compliance is load-bearing — a response without the
+# tags falls back to raw-text extraction (see compact_conversation), which silently
+# leaks the scratchpad into the summary.
+#
+# The no-tools guard appears ONCE, in the CRITICAL line. compact_conversation calls
+# complete() with tools=[] and both adapters omit the field entirely when empty, so
+# the model cannot emit a tool_use block at all; the single mention is belt-and-
+# suspenders for third-party LLMProvider implementations that ignore the argument.
 
 _COMPACT_PROMPT_HEAD: str = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT ask follow-up questions.
 - You already have all the context you need in the conversation above.
-- Tool calls will be rejected and will waste your only turn.
 - Your entire response must be plain text: an <analysis> block followed by a <summary> block.
 
 Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions. The summary must be thorough in capturing the key information, decisions, and context essential for continuing the work without losing context.
@@ -51,7 +57,7 @@ _COMPACT_PROMPT_TAIL: str = """Output format:
 <analysis>your analysis (will be stripped)</analysis>
 <summary>your summary here</summary>
 
-REMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> block followed by a <summary> block."""
+REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."""
 
 _EXTRA_INSTRUCTIONS_HEADER: str = (
     "Domain-specific requirements for this summary (these take precedence over the "
@@ -63,7 +69,7 @@ def build_compact_prompt(extra_instructions: str = "") -> str:
     """Render the compaction prompt, optionally with caller-supplied domain rules.
 
     The extra block lands after the nine generic sections and before the output
-    format + no-tools reminder. Its header grants it precedence, so callers can
+    format reminder. Its header grants it precedence, so callers can
     both add requirements ("also capture the candidate shortlist") and redefine
     generic ones ("for section 3, list resource IDs instead of code excerpts")
     without forking the base prompt.

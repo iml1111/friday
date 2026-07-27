@@ -92,6 +92,17 @@ def test_compact_prompt_has_enriched_structure():
     assert "function signatures" not in COMPACT_PROMPT
 
 
+def test_no_tools_guard_appears_exactly_once():
+    """compact_conversation sends tools=[] and both adapters drop the field entirely,
+    so the model cannot emit tool_use at all. One mention is belt-and-suspenders for
+    third-party providers that ignore the argument; repeating it is dead weight."""
+    assert COMPACT_PROMPT.count("Do NOT call any tools") == 1
+    # The trailing reminder guards the OUTPUT FORMAT, not tool use.
+    assert COMPACT_PROMPT.rstrip().endswith(
+        "REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."
+    )
+
+
 def test_create_compact_summary_message_has_continuation_framing():
     """The summary message wraps the summary with continuation + resume-directly framing."""
     msg = create_compact_summary_message("THE-SUMMARY-BODY")
@@ -128,15 +139,17 @@ def test_build_compact_prompt_blank_is_byte_identical_to_base(blank):
 def test_build_compact_prompt_places_extra_between_sections_and_output_format():
     """The domain block lands after section 9 and before the output format + REMINDER.
 
-    Order matters: the trailing REMINDER suppresses tool calls by recency, so an
-    injected block must never displace it from the end of the prompt.
+    Order matters: the trailing REMINDER carries the <analysis>/<summary> output
+    contract, and recency is what makes the model honor it. A response without the
+    tags degrades to raw-text extraction, so an injected block must never displace
+    the reminder from the end of the prompt.
     """
     prompt = build_compact_prompt("Always preserve the candidate shortlist.")
 
     section_9 = prompt.index("9. Optional Next Step")
     extra = prompt.index("Always preserve the candidate shortlist.")
     output_format = prompt.index("Output format:")
-    reminder = prompt.index("REMINDER: Do NOT call any tools")
+    reminder = prompt.index("REMINDER: Respond with plain text only")
 
     assert section_9 < extra < output_format < reminder
     assert prompt.rstrip().endswith("followed by a <summary> block.")
