@@ -10,10 +10,19 @@ from friday_agent.api.provider import (
 from friday_agent.context.compact import (
     COMPACT_PROMPT,
     SUMMARIZER_SYSTEM_PROMPT,
+    build_compact_prompt,
     compact_conversation,
     create_compact_summary_message,
 )
 from tests.fakes import FakeLLMProvider
+
+
+def _summary_response(text: str = "<summary>s</summary>") -> AssistantResponse:
+    return AssistantResponse(
+        content=[TextBlock(type="text", text=text)],
+        stop_reason=StopReason.END_TURN,
+        usage=TokenUsage(input_tokens=1, output_tokens=1),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -104,3 +113,68 @@ async def test_compact_conversation_uses_dedicated_summarizer_system():
     provider = FakeLLMProvider(responses=[response])
     await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
     assert provider.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# build_compact_prompt: optional domain-instruction slot
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+def test_build_compact_prompt_blank_is_byte_identical_to_base(blank):
+    """No injection (or whitespace only) must render the base prompt unchanged."""
+    assert build_compact_prompt(blank) == COMPACT_PROMPT
+
+
+def test_build_compact_prompt_places_extra_between_sections_and_output_format():
+    """The domain block lands after section 9 and before the output format + REMINDER.
+
+    Order matters: the trailing REMINDER suppresses tool calls by recency, so an
+    injected block must never displace it from the end of the prompt.
+    """
+    prompt = build_compact_prompt("Always preserve the candidate shortlist.")
+
+    section_9 = prompt.index("9. Optional Next Step")
+    extra = prompt.index("Always preserve the candidate shortlist.")
+    output_format = prompt.index("Output format:")
+    reminder = prompt.index("REMINDER: Do NOT call any tools")
+
+    assert section_9 < extra < output_format < reminder
+    assert prompt.rstrip().endswith("followed by a <summary> block.")
+    # The header grants the block precedence over the generic sections.
+    assert "take precedence over the generic sections above" in prompt
+
+
+def test_build_compact_prompt_keeps_base_prompt_intact():
+    """Injection is additive — every base guarantee survives."""
+    prompt = build_compact_prompt("domain rules")
+    assert COMPACT_PROMPT != prompt
+    for n in range(1, 10):
+        assert f"{n}." in prompt
+    assert "Do NOT call any tools" in prompt
+    assert "<analysis>" in prompt and "<summary>" in prompt
+
+
+@pytest.mark.asyncio
+async def test_compact_conversation_sends_extra_instructions():
+    """extra_instructions reaches the final user message of the summary call."""
+    provider = FakeLLMProvider(responses=[_summary_response()])
+
+    await compact_conversation(
+        provider=provider,
+        messages=[{"role": "user", "content": "x"}],
+        extra_instructions="Preserve every sourcing filter verbatim.",
+    )
+
+    final_message = provider.received_messages[0][-1]
+    assert final_message["role"] == "user"
+    assert "Preserve every sourcing filter verbatim." in final_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_compact_conversation_defaults_to_base_prompt():
+    """Omitting extra_instructions sends the untouched base prompt."""
+    provider = FakeLLMProvider(responses=[_summary_response()])
+
+    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+
+    assert provider.received_messages[0][-1]["content"] == COMPACT_PROMPT

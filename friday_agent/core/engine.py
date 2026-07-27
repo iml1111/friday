@@ -47,6 +47,11 @@ class FridayAgent:
                 subsystem is not mounted: no memory tools, no MEMORY_INSTRUCTIONS
                 system section, no per-turn index reminder. Pass a store
                 (e.g. FileMemoryStore()) to opt in.
+        compact_instructions: Domain requirements folded into the compaction
+                prompt used by compact(). system_prompt does not reach that call
+                (summarization runs under its own summarizer system prompt), so
+                this is the only way to steer what a summary must preserve.
+                Empty (the default) leaves the base prompt untouched.
 
     Raises:
         ValueError: When config is given but its type does not match the
@@ -61,6 +66,7 @@ class FridayAgent:
         config: LLMConfig | None = None,
         max_concurrency: int = 10,
         memory: MemoryStore | None = None,
+        compact_instructions: str = "",
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -88,6 +94,7 @@ class FridayAgent:
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
+        self._compact_instructions = compact_instructions
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -139,11 +146,16 @@ class FridayAgent:
         state.messages with a single summary message, then retry. (After the
         caller-owned-compaction refactor, step() surfaces this as a raised
         ContextOverflowError.) turn_count is preserved for observability.
+
+        The summarizer runs under SUMMARIZER_SYSTEM_PROMPT, not system_prompt —
+        compact_instructions (constructor) is the injection point for domain
+        requirements about what the summary must preserve.
         """
         api_messages = normalize_for_api(state.messages)
         summary_text = await compact_conversation(
             provider=self._provider,
             messages=api_messages,
+            extra_instructions=self._compact_instructions,
         )
         summary_message = create_compact_summary_message(summary_text)
         return LoopState(

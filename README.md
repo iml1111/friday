@@ -113,6 +113,23 @@ while True:
 
 마지막으로 받은 item이 `Terminal`이면 루프를 종료합니다. `terminal.reason`은 `completed` / `model_error` 중 하나입니다.
 
+### 컴팩션에 도메인 요구사항 주입 (opt-in)
+
+`engine.compact()`의 요약 호출은 전용 요약기 system 프롬프트로 돌기 때문에 `system_prompt`가 닿지 않습니다. "이 도메인에서는 요약에 무엇을 반드시 남겨야 하는가"는 생성자로 넘깁니다.
+
+```python
+engine = FridayAgent(
+    provider=provider,
+    system_prompt=DOMAIN_PROMPT,
+    compact_instructions=(
+        "- 활성 검색 필터는 원문 그대로 보존할 것.\n"
+        "- 3번 섹션은 코드 발췌 대신 후보 ID 목록으로 대체할 것."
+    ),
+)
+```
+
+주입된 블록은 기본 프롬프트의 9개 섹션 명세 **뒤**, 출력 형식 지시 **앞**에 들어가며 "generic 섹션보다 우선한다"는 헤더가 붙습니다 — 섹션 추가와 기존 섹션 재정의를 모두 커버합니다. 생략하면(기본값) 프롬프트는 바이트 단위로 그대로입니다. 상세는 [04-context-compaction](docs/architecture/04-context-compaction.md) 참조.
+
 ---
 
 ## 빌트인 능력
