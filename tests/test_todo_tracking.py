@@ -1,6 +1,11 @@
 """Todo/Task tracking: state effects, reminder injection, distributed resume."""
 from friday_agent.core.loop import apply_state_effects, render_todo_reminder, with_todo_reminder
-from friday_agent.messages.types import ContentBlock, create_user_message, create_tool_result_message
+from friday_agent.messages.types import (
+    SYSTEM_REMINDER_PREFIX,
+    ContentBlock,
+    create_user_message,
+    create_tool_result_message,
+)
 
 import json
 import pytest
@@ -64,6 +69,13 @@ def test_render_todo_reminder_formats_items():
     assert "<system-reminder>" in out and "</system-reminder>" in out
     assert "- [in_progress] Wire it up" in out
     assert "- [pending] Add tests" in out
+
+
+def test_todo_reminder_starts_with_shared_detection_prefix():
+    # Must open with the exact constant the Anthropic adapter's breakpoint
+    # skip matches on (see messages/types.py SYSTEM_REMINDER_PREFIX).
+    out = render_todo_reminder([{"content": "task", "status": "pending"}])
+    assert out.startswith(SYSTEM_REMINDER_PREFIX)
 
 
 # --- with_todo_reminder ------------------------------------------------------

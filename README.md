@@ -93,7 +93,7 @@ from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite·memory 도구는 빌트인으로 자동 등록됨
+engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite는 빌트인 자동 등록; memory는 opt-in(memory=store)
 state = LoopState(messages=[create_user_message("질문")])
 while True:
     try:
@@ -113,21 +113,38 @@ while True:
 
 마지막으로 받은 item이 `Terminal`이면 루프를 종료합니다. `terminal.reason`은 `completed` / `model_error` 중 하나입니다.
 
+### 컴팩션에 도메인 요구사항 주입 (opt-in)
+
+`engine.compact()`의 요약 호출은 전용 요약기 system 프롬프트로 돌기 때문에 `system_prompt`가 닿지 않습니다. "이 도메인에서는 요약에 무엇을 반드시 남겨야 하는가"는 생성자로 넘깁니다.
+
+```python
+engine = FridayAgent(
+    provider=provider,
+    system_prompt=DOMAIN_PROMPT,
+    compact_instructions=(
+        "- 활성 검색 필터는 원문 그대로 보존할 것.\n"
+        "- 3번 섹션은 코드 발췌 대신 후보 ID 목록으로 대체할 것."
+    ),
+)
+```
+
+주입된 블록은 기본 프롬프트의 9개 섹션 명세 **뒤**, 출력 형식 지시 **앞**에 들어가며 "generic 섹션보다 우선한다"는 헤더가 붙습니다 — 섹션 추가와 기존 섹션 재정의를 모두 커버합니다. 생략하면(기본값) 프롬프트는 바이트 단위로 그대로입니다. 상세는 [04-context-compaction](docs/architecture/04-context-compaction.md) 참조.
+
 ---
 
-## 빌트인 능력 (always-on)
+## 빌트인 능력
 
-호출자가 아무것도 배선하지 않아도 `FridayAgent`가 **항상 자동 등록·주입**하는 두 능력이 있다. opt-out은 없으며, 같은 이름의 도구를 `tools=`로 넘기면 `__init__`이 `ValueError`로 거부한다.
+`FridayAgent`가 SDK 수준에서 제공하는 두 능력이다. 같은 이름의 도구를 `tools=`로 넘기면 `__init__`이 `ValueError`로 거부한다.
 
-### TODO 추적
+### TODO 추적 (always-on)
 
-`TodoWrite` 도구가 항상 등록되고, todo 사용 가이던스(`TODO_GUIDANCE`)가 시스템 프롬프트에 항상 덧붙는다. 멀티스텝 작업에서 모델이 계획을 세우고 진행을 추적하는 용도다. 추적 리스트는 `LoopState.todos`에 살고, 매 턴 `<system-reminder>`로 API view에 재주입된다(비영속 — 분산 재개 시 `todos`에서 결정론적으로 재생성). 상세는 [02-tool-orchestration](docs/architecture/02-tool-orchestration.md) 참조.
+`TodoWrite` 도구가 항상 등록되고, todo 사용 가이던스(`TODO_GUIDANCE`)가 시스템 프롬프트에 항상 덧붙는다(opt-out 없음). 멀티스텝 작업에서 모델이 계획을 세우고 진행을 추적하는 용도다. 추적 리스트는 `LoopState.todos`에 살고, 매 턴 `<system-reminder>`로 API view에 재주입된다(비영속 — 분산 재개 시 `todos`에서 결정론적으로 재생성). 상세는 [02-tool-orchestration](docs/architecture/02-tool-orchestration.md) 참조.
 
-### 영속 메모리
+### 영속 메모리 (opt-in)
 
-세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. 기본 `FileMemoryStore`(→ `FRIDAY_MEMORY.md`)와 도구 `memory_save`/`memory_read`/`memory_delete`가 항상 등록되고, 메모리 지침 + 자동 인덱스가 `step()`에서 매 턴 재조립돼 시스템 프롬프트에 주입된다(캐시 없음 — 분산 재개 시 인덱스가 재개 시점 store 상태를 fresh 반영).
+세션 경계를 넘어 타입화된 fact(user/feedback/project/reference)를 장기화한다. `FridayAgent(..., memory=FileMemoryStore())`처럼 store를 명시 주입해야 장착되며(기본 `memory=None`이면 미장착), 장착 시 도구 `memory_save`/`memory_read`/`memory_delete`가 등록되고 메모리 지침(`MEMORY_INSTRUCTIONS`)이 시스템 프롬프트에, 라이브 인덱스가 매 턴 turn-local `<system-reminder>`로 주입된다(비영속 — 분산 재개 시 인덱스가 재개 시점 store 상태를 fresh 반영).
 
-자신의 백엔드(외부 Storage·DB 등)로 store를 교체하는 방법은 [확장 가이드 — ③ 메모리 백엔드](#확장-가이드-인터페이스-주입으로-커스터마이징) 참조.
+자신의 백엔드(외부 Storage·DB 등)로 store를 구현하는 방법은 [확장 가이드 — ③ 메모리 백엔드](#확장-가이드-인터페이스-주입으로-커스터마이징) 참조.
 
 ---
 
@@ -175,7 +192,7 @@ class WeatherTool(Tool):
 
 만든 도구를 `FridayAgent(tools=[WeatherTool()])`에 넘기면 모델이 호출할 수 있습니다.
 
-> `TodoWrite`와 메모리 도구(`memory_save`/`memory_read`/`memory_delete`)는 빌트인이라 `tools=`에 직접 넣지 마세요 — 이름이 겹치면 `FridayAgent.__init__`이 `ValueError`로 거부합니다([빌트인 능력](#빌트인-능력-always-on) 참조).
+> `TodoWrite`(항상)와 메모리 도구(`memory_save`/`memory_read`/`memory_delete`, `memory=` 장착 시)는 SDK가 등록하므로 `tools=`에 직접 넣지 마세요 — 이름이 겹치면 `FridayAgent.__init__`이 `ValueError`로 거부합니다([빌트인 능력](#빌트인-능력) 참조).
 
 #### LLM은 도구를 어떻게 인지하는가
 
@@ -261,7 +278,7 @@ class MyProvider(LLMProvider[MyConfig]):
 
 ### ③ 메모리 백엔드 (MemoryStore)
 
-`MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**합니다. 자신의 store를 주입하면 기본 `FileMemoryStore`와 그 도구가 통째로 대체됩니다.
+`MemoryStore` 하나가 **영속 백엔드 + 그 도구 표면(`tools()`)을 모두 소유**합니다. `memory=`로 주입한 store가 곧 장착되는 서브시스템 전체입니다(파일 기반 기본 구현은 `FileMemoryStore`).
 
 ```python
 from friday_agent.memory.store import MemoryStore, MemoryEntry, IndexEntry

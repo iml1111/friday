@@ -1,4 +1,4 @@
-"""Engine integration: always-on memory, replaceable store, collision, compact-clean."""
+"""Engine integration: opt-in memory, replaceable store, collision, compact-clean."""
 import pytest
 from pydantic import BaseModel
 
@@ -11,7 +11,7 @@ from friday_agent.api.provider import (
 )
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState
-from friday_agent.memory.store import MEMORY_INSTRUCTIONS
+from friday_agent.memory.store import MEMORY_INSTRUCTIONS, MemoryEntry, MemoryType
 from friday_agent.messages.types import create_user_message
 from friday_agent.tools.base import Tool, ToolResult
 from tests._drive import collect_turn
@@ -39,6 +39,34 @@ async def test_memory_instructions_injected_into_system_prompt():
     sp = fake.received_system_prompts[0]
     assert "BASE" in sp
     assert MEMORY_INSTRUCTIONS in sp
+    # Generic -> specific: SDK memory instructions precede the domain prompt.
+    assert sp.index(MEMORY_INSTRUCTIONS) < sp.index("BASE")
+
+
+@pytest.mark.asyncio
+async def test_memory_index_rides_turn_reminder_not_system_prompt():
+    # The live index is per-turn mutable: it must ride messages[-1] as a
+    # <system-reminder> (cache-safe), never the system prefix.
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="user-role", description="backend eng", type=MemoryType.user, body="B"))
+    fake = FakeLLMProvider(responses=[_end()])
+    engine = FridayAgent(provider=fake, tools=[], system_prompt="BASE", memory=store)
+    await collect_turn(engine, LoopState(messages=[create_user_message("hi")]))
+
+    assert "[user] user-role" not in fake.received_system_prompts[0]
+    last = fake.received_messages[0][-1]
+    joined = "".join(b.get("text", "") for b in last["content"])
+    assert "<system-reminder>" in joined
+    assert "[user] user-role — backend eng" in joined
+
+
+@pytest.mark.asyncio
+async def test_empty_store_adds_no_reminder_block():
+    fake = FakeLLMProvider(responses=[_end()])
+    engine = FridayAgent(provider=fake, tools=[], memory=InMemoryStore())
+    await collect_turn(engine, LoopState(messages=[create_user_message("hi")]))
+    last = fake.received_messages[0][-1]
+    assert [b.get("text") for b in last["content"]] == ["hi"]  # no extra block
 
 
 def test_caller_tool_colliding_with_memory_name_raises():
@@ -121,11 +149,20 @@ async def test_memory_body_does_not_leak_into_loopstate_serde():
     assert set(outcome.to_dict().keys()) == {"messages", "turn_count", "todos"}
 
 
-def test_default_memory_is_file_store_and_registers_tools():
-    # memory=None → default FileMemoryStore; construction triggers no file I/O.
-    from friday_agent.memory.store import FileMemoryStore
-
+def test_default_no_memory_subsystem_mounted():
+    # memory=None (default) -> opt-in: no store, no memory tools registered.
     engine = FridayAgent(provider=FakeLLMProvider(responses=[]), tools=[])
     names = {t.name for t in engine._tools}
-    assert {"memory_save", "memory_read", "memory_delete"} <= names
-    assert isinstance(engine._memory, FileMemoryStore)
+    assert not ({"memory_save", "memory_read", "memory_delete"} & names)
+    assert engine._memory is None
+
+
+@pytest.mark.asyncio
+async def test_default_no_memory_instructions_or_reminder():
+    # Without a store, neither MEMORY_INSTRUCTIONS nor an index reminder is injected.
+    fake = FakeLLMProvider(responses=[_end()])
+    engine = FridayAgent(provider=fake, tools=[], system_prompt="BASE")
+    await collect_turn(engine, LoopState(messages=[create_user_message("hi")]))
+    assert MEMORY_INSTRUCTIONS not in fake.received_system_prompts[0]
+    last = fake.received_messages[0][-1]
+    assert [b.get("text") for b in last["content"]] == ["hi"]  # no reminder block

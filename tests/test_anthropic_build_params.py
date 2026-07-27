@@ -65,8 +65,9 @@ def test_build_params_caches_conversation_messages():
 
 
 def test_build_params_second_to_last_anchor_stable():
-    # messages[-1] carries an extra reminder-like trailing block; the always-stable
-    # anchor messages[-2] must still carry the breakpoint.
+    # messages[-1] carries a trailing turn-local reminder; the breakpoint skips
+    # it (non-persistent) and lands on the last persistent block, while the
+    # always-stable anchor messages[-2] still carries its breakpoint.
     messages = [
         {"role": "assistant", "content": [{"type": "text", "text": "a1"}]},
         {"role": "user", "content": [
@@ -76,7 +77,8 @@ def test_build_params_second_to_last_anchor_stable():
     ]
     params = _provider()._build_params(messages, "sys", [], AnthropicConfig())
     assert params["messages"][-2]["content"][-1]["cache_control"] == _EPHEMERAL
-    assert params["messages"][-1]["content"][-1]["cache_control"] == _EPHEMERAL
+    assert params["messages"][-1]["content"][0]["cache_control"] == _EPHEMERAL
+    assert "cache_control" not in params["messages"][-1]["content"][-1]  # reminder unmarked
 
 
 def test_build_params_cache_with_empty_system():

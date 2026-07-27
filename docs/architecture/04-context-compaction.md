@@ -13,7 +13,7 @@
 
 | 경로 | 책임 | 핵심 심볼 |
 |---|---|---|
-| `friday_agent/context/compact.py` | 대화 요약 생성·요약 메시지 구성 | `compact_conversation()`, `create_compact_summary_message()`, `COMPACT_PROMPT`, `MAX_OUTPUT_TOKENS_FOR_SUMMARY` |
+| `friday_agent/context/compact.py` | 대화 요약 생성·요약 메시지 구성 | `compact_conversation()`, `create_compact_summary_message()`, `build_compact_prompt()`, `COMPACT_PROMPT`, `MAX_OUTPUT_TOKENS_FOR_SUMMARY` |
 | `friday_agent/core/engine.py` | compact 진입점 | `FridayAgent.compact()` |
 
 ---
@@ -24,8 +24,9 @@
 step() → ContextOverflowError raise
    └─ 호출자가 engine.compact(state) 호출
          ├─ normalize_for_api(state.messages)          # API 형식 dict 리스트로 변환
-         └─ compact_conversation(provider, messages)   # 요약기 system = 전용 SUMMARIZER_SYSTEM_PROMPT (호출자 role 미전달)
-               ├─ messages 끝에 COMPACT_PROMPT를 마지막 user 메시지로 추가
+         └─ compact_conversation(provider, messages, extra_instructions)
+               #   요약기 system = 전용 SUMMARIZER_SYSTEM_PROMPT (호출자 role 미전달)
+               ├─ build_compact_prompt(extra_instructions)를 마지막 user 메시지로 추가
                ├─ provider.complete(tools=[], config=config_type(max_tokens=20000))
                │     # tools=[] : 요약 중 도구 호출 엄격 금지
                └─ 응답 텍스트에서 <summary>...</summary> 추출
@@ -38,7 +39,7 @@ step() → ContextOverflowError raise
 
 ### COMPACT_PROMPT 보존 항목
 
-`context/compact.py:22`의 `COMPACT_PROMPT`는 LLM에게 다음 9개 항목을 요약 안에 보존하도록 지시한다:
+`context/compact.py:37`의 `_COMPACT_PROMPT_HEAD`는 LLM에게 다음 9개 항목을 요약 안에 보존하도록 지시한다:
 
 1. Primary Request and Intent (주요 요청·의도)
 2. Key Technical Concepts (핵심 기술 개념)
@@ -50,7 +51,28 @@ step() → ContextOverflowError raise
 8. Current Work (최근 작업의 정확한 설명)
 9. Optional Next Step (직접 인용 포함)
 
-출력 형식은 `<analysis>스크래치패드</analysis><summary>요약 본문</summary>`이며, `<analysis>` 블록은 추출 시 폐기된다. 강화된 `COMPACT_PROMPT`는 9개 항목 외에 강제 no-tools 프리앰블·체계적 분석 지침·트레일러를 포함해 도구 호출 억제와 `<summary>` 포맷 준수율을 높인다(원본 `services/compact/prompt.ts` 기준, 개발 특화 표현은 일반화).
+출력 형식은 `<analysis>스크래치패드</analysis><summary>요약 본문</summary>`이며, `<analysis>` 블록은 추출 시 폐기된다. `COMPACT_PROMPT`는 9개 항목 외에 체계적 분석 지침과 포맷 트레일러를 포함해 `<summary>` 포맷 준수율을 높인다(원본 `services/compact/prompt.ts` 기준, 개발 특화 표현은 일반화).
+
+**no-tools 가드는 1회만 등장한다** (첫 `CRITICAL:` 줄). `compact_conversation`이 `tools=[]`로 호출하고 두 어댑터 모두 빈 리스트면 `tools` 필드를 통째로 생략하므로(`anthropic_provider.py:145-146`, `openai_provider.py:142-143`) 모델은 애초에 `tool_use` 블록을 만들 수 없다. 남긴 1회는 `tools` 인자를 무시하는 서드파티 `LLMProvider` 구현에 대한 belt-and-suspenders다 — 반복은 사문(死文)이라 걷어냈다. 회귀 방지는 `tests/test_compact.py::test_no_tools_guard_appears_exactly_once`.
+
+### 도메인 지침 주입 슬롯 (opt-in)
+
+요약 호출은 호출자의 `system_prompt`를 받지 않는다(전용 `SUMMARIZER_SYSTEM_PROMPT` 사용). 따라서 "이 도메인에서는 요약에 무엇을 반드시 남겨야 하는가"를 지정할 **유일한 통로**가 `FridayAgent(..., compact_instructions="...")`다. 값은 `engine.compact()` → `compact_conversation(extra_instructions=...)` → `build_compact_prompt()`로 전달된다.
+
+```
+<head: CRITICAL 가드(no-tools 1회·no-questions) + 분석 지침 + 9개 섹션 명세>
+
+Domain-specific requirements for this summary
+(these take precedence over the generic sections above):
+<compact_instructions 본문>                              ← 주입 슬롯
+
+<tail: Output format + REMINDER(출력 포맷 계약)>
+```
+
+- **위치가 계약이다** — 슬롯은 9번 섹션 뒤·`Output format` 앞이다. 트레일링 `REMINDER`가 `<analysis>`/`<summary>` **출력 포맷 계약**을 지고 있고 recency가 그 준수를 만든다. 태그 없는 응답은 전체 텍스트 폴백으로 떨어져 스크래치패드가 요약에 섞여 들어가므로, 주입 블록이 이 자리를 밀어내면 안 된다.
+- **precedence 헤더** — "take precedence over the generic sections above" 문구 덕에 섹션 추가(10번을 더 써라)와 기존 섹션 재정의(3번은 이렇게 다뤄라)가 모두 한 슬롯으로 커버된다. 그래서 프롬프트 **전체 교체 옵션은 두지 않는다** — 교체를 허용하면 vendored 사본이 업스트림 프롬프트 개선을 못 받는 포크 상태가 된다.
+- **기본값은 무변경** — `compact_instructions=""`(기본)이면 `build_compact_prompt()`의 출력이 `COMPACT_PROMPT`와 **바이트 단위로 동일**하다. 공백만 든 문자열도 no-op.
+- 엔진 로컬 설정이라 `LoopState` 직렬화 면은 불변 — 분산 재개 시 `provider`·`system_prompt`와 함께 컨테이너-로컬로 재주입한다.
 
 ---
 
@@ -59,27 +81,36 @@ step() → ContextOverflowError raise
 ### `engine.compact(state) -> LoopState`
 
 ```python
-# core/engine.py:116
 async def compact(self, state: LoopState) -> LoopState:
 ```
 
 - 인자: 현재 `LoopState` (messages 포함)
 - 반환: 요약 메시지 1개(`messages=[summary_message]`)와 보존된 `turn_count`를 담은 새 `LoopState`
 - 호출자는 반환된 축소 상태를 `step()`에 그대로 넘겨 재시도한다
+- 도메인 요약 지침은 호출 인자가 아니라 생성자 `FridayAgent(..., compact_instructions=...)`로 한 번 설정한다
 
 ### `compact_conversation()` — 직접 사용 시
 
 ```python
-# context/compact.py:80
 async def compact_conversation(
     *,
     provider: LLMProvider,
     messages: list[dict],
+    extra_instructions: str = "",
 ) -> str:
 ```
 
 - `tools=[]`로 고정. `config_type(max_tokens=20000)` 사용.
 - 반환값: 추출된 요약 텍스트 문자열 (태그 제거 후)
+
+### `build_compact_prompt()` — 프롬프트 렌더링
+
+```python
+def build_compact_prompt(extra_instructions: str = "") -> str:
+```
+
+- 인자가 비면(또는 공백뿐이면) `COMPACT_PROMPT`와 동일한 문자열을 반환한다.
+- `COMPACT_PROMPT` 상수 자체가 `build_compact_prompt()`의 결과로 정의돼 있어 둘이 갈라질 수 없다.
 
 ---
 
@@ -97,10 +128,10 @@ async def compact_conversation(
 
 ## ⑥ 유지보수 주의점
 
-- **`tools=[]` 필수**: `compact_conversation()` 내 `provider.complete()` 호출은 반드시 `tools=[]`여야 한다(`context/compact.py:114`). 요약 중 도구 호출이 허용되면 tool_use↔tool_result 쌍 정합성이 깨질 수 있다.
-- **`is_compact_summary=True` 플래그**: `create_compact_summary_message()`가 생성하는 user 메시지는 `is_compact_summary=True`로 표시된다(`context/compact.py:70-73`). 이 플래그는 [05-messages](05-messages.md)의 메시지 유형 분류와 연동되며, 제거하거나 누락하면 메시지 필터링 로직이 요약 메시지를 일반 사용자 메시지로 오분류할 수 있다.
-- **`turn_count` 보존**: `engine.compact()`는 `LoopState(messages=[summary_message], turn_count=state.turn_count)`로 반환한다(`core/engine.py:132`). 축소 후 `turn_count`가 리셋되지 않아야 관측 지표가 유지된다.
-- **`<summary>` 태그 폴백**: `<summary>` 태그가 없으면 전체 응답 텍스트를 그대로 사용한다(`context/compact.py:128-129`). LLM이 포맷을 어기더라도 루프가 중단되지 않도록 설계된 방어 코드다. 포맷 준수율이 낮아지면 요약 품질 저하로 이어지므로 프롬프트 수정 시 주의한다.
+- **`tools=[]` 필수**: `compact_conversation()` 내 `provider.complete()` 호출은 반드시 `tools=[]`여야 한다(`context/compact.py:159`). **이것이 실제 강제 수단이다** — 프롬프트의 no-tools 문구는 서드파티 프로바이더용 보조일 뿐이고, 도구 호출 차단은 이 한 줄이 한다. 요약 중 도구 호출이 허용되면 tool_use↔tool_result 쌍 정합성이 깨질 수 있다.
+- **`is_compact_summary=True` 플래그**: `create_compact_summary_message()`가 생성하는 user 메시지는 `is_compact_summary=True`로 표시된다(`context/compact.py:122`). 이 플래그는 [05-messages](05-messages.md)의 메시지 유형 분류와 연동되며, 제거하거나 누락하면 메시지 필터링 로직이 요약 메시지를 일반 사용자 메시지로 오분류할 수 있다.
+- **`turn_count` 보존**: `engine.compact()`는 `LoopState(messages=[summary_message], turn_count=state.turn_count)`로 반환한다(`core/engine.py:163`). 축소 후 `turn_count`가 리셋되지 않아야 관측 지표가 유지된다.
+- **`<summary>` 태그 폴백**: `<summary>` 태그가 없으면 전체 응답 텍스트를 그대로 사용한다(`context/compact.py:173-174`). LLM이 포맷을 어기더라도 루프가 중단되지 않도록 설계된 방어 코드다. 포맷 준수율이 낮아지면 요약 품질 저하로 이어지므로 프롬프트 수정 시 주의한다.
 - **요약기 system 분리**: 요약 호출의 system은 전용 `SUMMARIZER_SYSTEM_PROMPT`(`context/compact.py`)다. `engine.compact()`는 호출자 도메인 role을 요약 호출에 넘기지 않는다(요약은 "요약" 작업이 본질).
 - **재개(continuation) 프레이밍**: `create_compact_summary_message()`는 요약을 "이전 대화 이어받기" 프리앰블 + "곧장 재개, 추가 질문 금지" 지시로 감싼다. 컴팩션 후 재개를 매끄럽게 하기 위한 것으로, 본문 변경 시 재개 동작에 영향을 준다.
 

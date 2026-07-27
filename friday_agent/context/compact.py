@@ -22,10 +22,20 @@ SUMMARIZER_SYSTEM_PROMPT: str = (
 # ---------------------------------------------------------------------------
 # Compact prompt
 # ---------------------------------------------------------------------------
+# Split into head (guards + section spec) and tail (output format reminder) so
+# callers can inject domain requirements between them. The tail must stay last:
+# it carries the <analysis>/<summary> output contract, and recency is what makes
+# the model honor it. Format compliance is load-bearing — a response without the
+# tags falls back to raw-text extraction (see compact_conversation), which silently
+# leaks the scratchpad into the summary.
+#
+# The no-tools guard appears ONCE, in the CRITICAL line. compact_conversation calls
+# complete() with tools=[] and both adapters omit the field entirely when empty, so
+# the model cannot emit a tool_use block at all; the single mention is belt-and-
+# suspenders for third-party LLMProvider implementations that ignore the argument.
 
-COMPACT_PROMPT: str = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT ask follow-up questions.
+_COMPACT_PROMPT_HEAD: str = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT ask follow-up questions.
 - You already have all the context you need in the conversation above.
-- Tool calls will be rejected and will waste your only turn.
 - Your entire response must be plain text: an <analysis> block followed by a <summary> block.
 
 Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions. The summary must be thorough in capturing the key information, decisions, and context essential for continuing the work without losing context.
@@ -41,13 +51,42 @@ Your summary should include the following sections:
 6. All user messages: List ALL user messages that are not tool results. These are critical for understanding feedback and changing intent.
 7. Pending Tasks: Outline any pending tasks you have explicitly been asked to work on.
 8. Current Work: Describe precisely what was being worked on immediately before this summary request.
-9. Optional Next Step: List the next step that is directly in line with the user's most recent explicit request and the work in progress. Include direct quotes to avoid drift. Do not start tangential or already-completed work without confirming first.
+9. Optional Next Step: List the next step that is directly in line with the user's most recent explicit request and the work in progress. Include direct quotes to avoid drift. Do not start tangential or already-completed work without confirming first."""
 
-Output format:
+_COMPACT_PROMPT_TAIL: str = """Output format:
 <analysis>your analysis (will be stripped)</analysis>
 <summary>your summary here</summary>
 
-REMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> block followed by a <summary> block."""
+REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."""
+
+_EXTRA_INSTRUCTIONS_HEADER: str = (
+    "Domain-specific requirements for this summary (these take precedence over the "
+    "generic sections above):"
+)
+
+
+def build_compact_prompt(extra_instructions: str = "") -> str:
+    """Render the compaction prompt, optionally with caller-supplied domain rules.
+
+    The extra block lands after the nine generic sections and before the output
+    format reminder. Its header grants it precedence, so callers can
+    both add requirements ("also capture the candidate shortlist") and redefine
+    generic ones ("for section 3, list resource IDs instead of code excerpts")
+    without forking the base prompt.
+
+    Args:
+        extra_instructions: Domain summary requirements. Blank (or whitespace)
+            renders the base prompt unchanged, byte for byte.
+
+    Returns:
+        The full prompt text to send as the final user message.
+    """
+    extra = extra_instructions.strip()
+    middle = [f"{_EXTRA_INSTRUCTIONS_HEADER}\n{extra}"] if extra else []
+    return "\n\n".join([_COMPACT_PROMPT_HEAD, *middle, _COMPACT_PROMPT_TAIL])
+
+
+COMPACT_PROMPT: str = build_compact_prompt()
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +130,7 @@ async def compact_conversation(
     *,
     provider: LLMProvider,
     messages: list[dict],
+    extra_instructions: str = "",
 ) -> str:
     """Summarise a conversation and return the extracted summary text.
 
@@ -102,11 +142,14 @@ async def compact_conversation(
     Args:
         provider: LLM backend used to generate the summary.
         messages: Conversation history in API-ready ``list[dict]`` form.
+        extra_instructions: Domain summary requirements folded into the compact
+            prompt (see ``build_compact_prompt``). Blank means the base prompt.
 
     Returns:
         Extracted summary text (stripped of surrounding whitespace).
     """
-    compact_messages = list(messages) + [{"role": "user", "content": COMPACT_PROMPT}]
+    prompt = build_compact_prompt(extra_instructions)
+    compact_messages = list(messages) + [{"role": "user", "content": prompt}]
 
     config = provider.config_type(max_tokens=MAX_OUTPUT_TOKENS_FOR_SUMMARY)
 

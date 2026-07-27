@@ -10,7 +10,7 @@ Verifies the step() API and the tests/_drive.py driver:
 import pytest
 
 from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE
-from friday_agent.context.compact import SUMMARIZER_SYSTEM_PROMPT
+from friday_agent.context.compact import COMPACT_PROMPT, SUMMARIZER_SYSTEM_PROMPT
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
@@ -65,7 +65,7 @@ async def test_drive_passes_system_prompt():
             terminal = item
 
     assert terminal.reason == "completed"
-    assert fake.received_system_prompts[0].startswith("You are a test assistant.")
+    assert fake.received_system_prompts[0].endswith("You are a test assistant.")
     assert GENERAL_AGENT_GUIDANCE in fake.received_system_prompts[0]
 
 
@@ -208,3 +208,45 @@ async def test_compact_preserves_todos():
     assert len(new_state.messages) == 1
     assert new_state.turn_count == 4
     assert new_state.todos == todos
+
+
+@pytest.mark.asyncio
+async def test_compact_forwards_compact_instructions():
+    """compact_instructions reaches the summary call's final user message.
+
+    system_prompt is deliberately absent from that call (see the test above), so
+    this is the only channel for domain summary requirements.
+    """
+    summary = AssistantResponse(
+        content=[TextBlock(text="<summary>S</summary>")],
+        stop_reason=StopReason.END_TURN, usage=TokenUsage(),
+    )
+    fake = FakeLLMProvider(responses=[summary])
+    engine = FridayAgent(
+        provider=fake,
+        tools=[],
+        system_prompt="You are a domain assistant.",
+        compact_instructions="Always keep the active sourcing filters verbatim.",
+    )
+
+    await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
+
+    final_message = fake.received_messages[0][-1]
+    assert "Always keep the active sourcing filters verbatim." in final_message["content"]
+    # The domain prompt still stays out of the summarizer system slot.
+    assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_compact_without_instructions_sends_base_prompt():
+    """Default engine (no compact_instructions) leaves the compact prompt untouched."""
+    summary = AssistantResponse(
+        content=[TextBlock(text="<summary>S</summary>")],
+        stop_reason=StopReason.END_TURN, usage=TokenUsage(),
+    )
+    fake = FakeLLMProvider(responses=[summary])
+    engine = FridayAgent(provider=fake, tools=[])
+
+    await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
+
+    assert fake.received_messages[0][-1]["content"] == COMPACT_PROMPT

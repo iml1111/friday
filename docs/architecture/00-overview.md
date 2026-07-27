@@ -40,7 +40,7 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 
 턴 경계에서 직렬화 가능한 `LoopState`를 그대로 방출해 **stateless 분산 재개**를 지원한다.
 
-또한 `FridayAgent`는 **TodoWrite(todo 추적)**와 **메모리(`MemoryStore`)**를 호출자 배선 없이 항상 빌트인으로 등록·주입한다 — 상세는 [02-tool-orchestration](02-tool-orchestration.md)·[08-memory](08-memory.md) 참조.
+또한 `FridayAgent`는 **TodoWrite(todo 추적)**를 호출자 배선 없이 항상 빌트인으로 등록·주입하고, **메모리(`MemoryStore`)**는 opt-in이다 — `memory=` 인자로 store를 명시 주입해야 장착된다. 상세는 [02-tool-orchestration](02-tool-orchestration.md)·[08-memory](08-memory.md) 참조.
 
 ---
 
@@ -55,7 +55,7 @@ item이 LoopState면 그대로 step() 재호출, Terminal이면 종료.
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (횡단) | par-critical 불변식 | [06-invariants](06-invariants.md) |
 | (횡단) | 전 데이터 모델 카탈로그 | [07-data-models](07-data-models.md) |
-| `memory/` | `store.py`·`tool.py` — 영속 메모리 서브시스템. always-on 빌트인, `MemoryStore` 주입으로 교체 | [08-memory](08-memory.md) |
+| `memory/` | `store.py`·`tool.py` — 영속 메모리 서브시스템. opt-in(`memory=` store 주입 시 장착) | [08-memory](08-memory.md) |
 
 ---
 
