@@ -93,7 +93,7 @@ from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import create_user_message
 from friday_agent.api.provider import ContextOverflowError
 
-engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite·memory tools are auto-registered as built-ins
+engine = FridayAgent(provider=provider, tools=[...])   # TodoWrite is auto-registered as a built-in; memory is opt-in (memory=store)
 state = LoopState(messages=[create_user_message("Question")])
 while True:
     try:
@@ -113,21 +113,38 @@ while True:
 
 If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`.
 
+### Injecting Domain Requirements into Compaction (opt-in)
+
+The summarization call in `engine.compact()` runs with a dedicated summarizer system prompt, so `system_prompt` does not reach it. "What must the summary always retain in this domain" is passed via the constructor.
+
+```python
+engine = FridayAgent(
+    provider=provider,
+    system_prompt=DOMAIN_PROMPT,
+    compact_instructions=(
+        "- Preserve active search filters verbatim.\n"
+        "- Replace section 3 with a list of candidate IDs instead of code excerpts."
+    ),
+)
+```
+
+The injected block is placed **after** the default prompt's 9-section spec and **before** the output-format instructions, with a header stating it "takes precedence over the generic sections" — covering both adding sections and redefining existing ones. If omitted (the default), the prompt is byte-for-byte unchanged. For details, see [04-context-compaction](docs/architecture/04-context-compaction.md).
+
 ---
 
-## Built-in Capabilities (always-on)
+## Built-in Capabilities
 
-There are two capabilities that `FridayAgent` **always auto-registers·injects** even if the caller wires nothing. There is no opt-out, and if you pass a tool with the same name via `tools=`, `__init__` rejects it with `ValueError`.
+The two capabilities `FridayAgent` provides at the SDK level. If you pass a tool with the same name via `tools=`, `__init__` rejects it with `ValueError`.
 
-### TODO Tracking
+### TODO Tracking (always-on)
 
-The `TodoWrite` tool is always registered, and the todo usage guidance (`TODO_GUIDANCE`) is always appended to the system prompt. It lets the model plan and track progress on multi-step tasks. The tracking list lives in `LoopState.todos` and is re-injected into the API view every turn as a `<system-reminder>` (non-persistent — regenerated deterministically from `todos` on distributed resume). For details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
+The `TodoWrite` tool is always registered, and the todo usage guidance (`TODO_GUIDANCE`) is always appended to the system prompt (no opt-out). It lets the model plan and track progress on multi-step tasks. The tracking list lives in `LoopState.todos` and is re-injected into the API view every turn as a `<system-reminder>` (non-persistent — regenerated deterministically from `todos` on distributed resume). For details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
 
-### Persistent Memory
+### Persistent Memory (opt-in)
 
-Persists typed facts (user/feedback/project/reference) long-term across session boundaries. The default `FileMemoryStore` (→ `FRIDAY_MEMORY.md`) and the tools `memory_save`/`memory_read`/`memory_delete` are always registered, and the memory instructions + automatic index are reassembled every turn in `step()` and injected into the system prompt (no caching — on distributed resume the index freshly reflects the store state at resume time).
+Persists typed facts (user/feedback/project/reference) long-term across session boundaries. It is mounted only when a store is explicitly injected, as in `FridayAgent(..., memory=FileMemoryStore())` (not mounted with the default `memory=None`). When mounted, the tools `memory_save`/`memory_read`/`memory_delete` are registered, the memory instructions (`MEMORY_INSTRUCTIONS`) are injected into the system prompt, and the live index is injected every turn as a turn-local `<system-reminder>` (non-persistent — on distributed resume the index freshly reflects the store state at resume time).
 
-For how to replace the store with your own backend (external Storage·DB, etc.), see [Extension Guide — ③ Memory Backend](#extension-guide-customizing-via-interface-injection).
+For how to implement a store on your own backend (external Storage·DB, etc.), see [Extension Guide — ③ Memory Backend](#extension-guide-customizing-via-interface-injection).
 
 ---
 
@@ -175,7 +192,7 @@ class WeatherTool(Tool):
 
 Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model can call it.
 
-> `TodoWrite` and the memory tools (`memory_save`/`memory_read`/`memory_delete`) are built-ins, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities-always-on)).
+> `TodoWrite` (always) and the memory tools (`memory_save`/`memory_read`/`memory_delete`, when `memory=` is mounted) are registered by the SDK, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities)).
 
 #### How the LLM Recognizes Tools
 
@@ -261,7 +278,7 @@ For the vendor differences table·normalization details, see [03-llm-providers](
 
 ### ③ Memory Backend (MemoryStore)
 
-A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**. Injecting your own store replaces the default `FileMemoryStore` and its tools wholesale.
+A single `MemoryStore` **owns both the persistent backend and its tool surface (`tools()`)**. The store injected via `memory=` is itself the entire mounted subsystem (the file-based default implementation is `FileMemoryStore`).
 
 ```python
 from friday_agent.memory.store import MemoryStore, MemoryEntry, IndexEntry

@@ -63,7 +63,8 @@ async def test_run_one_turn_tool_use_yields_loopstate():
 
 @pytest.mark.asyncio
 async def test_run_one_turn_injects_general_guidance():
-    """run_one_turn appends GENERAL_AGENT_GUIDANCE after the caller's system prompt."""
+    """run_one_turn prepends GENERAL_AGENT_GUIDANCE before the caller's system
+    prompt (generic -> specific: domain rules win by recency)."""
     end = AssistantResponse(content=[TextBlock(text="ok")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
     provider = FakeLLMProvider(responses=[end])
     state = LoopState(messages=[create_user_message("hi")])
@@ -75,7 +76,7 @@ async def test_run_one_turn_injects_general_guidance():
     await _drain(agen)
 
     sent = provider.received_system_prompts[0]
-    assert sent.startswith("You are a research assistant.")
+    assert sent.endswith("You are a research assistant.")
     assert GENERAL_AGENT_GUIDANCE in sent
 
 

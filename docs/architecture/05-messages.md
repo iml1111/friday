@@ -11,7 +11,7 @@ Provides the message construction helpers shared by the loop · orchestrator · 
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/messages/types.py` | Internal Message · ContentBlock · construction helpers | `Message`, `ContentBlock`, `create_user_message()`, `create_tool_result_message()` |
+| `friday_agent/messages/types.py` | Internal Message · ContentBlock · construction helpers + turn-local reminder protocol | `Message`, `ContentBlock`, `create_user_message()`, `create_tool_result_message()`, `wrap_system_reminder()`, `SYSTEM_REMINDER_PREFIX` |
 | `friday_agent/messages/normalize.py` | API format conversion | `normalize_for_api()` |
 
 ---
@@ -37,7 +37,7 @@ A single flat dataclass that represents every block kind with one type.
 
 ---
 
-### `Message` — `messages/types.py:20`
+### `Message` — `messages/types.py:48`
 
 The internal conversation unit the loop manages as the `state.messages` list.
 
@@ -55,7 +55,7 @@ The internal conversation unit the loop manages as the `state.messages` list.
 
 ### Construction Helpers
 
-#### `create_user_message()` — `messages/types.py:30`
+#### `create_user_message()` — `messages/types.py:81`
 
 ```python
 def create_user_message(
@@ -69,7 +69,7 @@ def create_user_message(
 - If `content` is a `str`, it is auto-wrapped into a single `ContentBlock(type="text", text=content)`.
 - Fixed to `type="user"`, `role="user"`.
 
-#### `create_tool_result_message()` — `messages/types.py:47`
+#### `create_tool_result_message()` — `messages/types.py:98`
 
 ```python
 def create_tool_result_message(
@@ -114,13 +114,15 @@ Converts the internal `Message` list into the `{"role": str, "content": list[dic
 
 ## ④ Public API
 
-The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and compactor (`context/compact.py`) directly import and use the 3 symbols below.
+The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and compactor (`context/compact.py`) directly import and use the first 3 symbols; the 2 turn-local reminder protocol symbols are shared by the reminder producers (`core/loop.py`·`memory/store.py`) and the detector (`api/anthropic_provider.py`).
 
 | Symbol | Location | Role |
 |---|---|---|
-| `create_user_message()` | `messages/types.py:30` | Create user input · meta messages |
-| `create_tool_result_message()` | `messages/types.py:47` | Create tool result messages |
+| `create_user_message()` | `messages/types.py:81` | Create user input · meta messages |
+| `create_tool_result_message()` | `messages/types.py:98` | Create tool result messages |
 | `normalize_for_api()` | `messages/normalize.py:6` | Conversion just before API transmission |
+| `wrap_system_reminder()` | `messages/types.py:124` | Wrap turn-local reminders in `<system-reminder>` (shared by all producers) |
+| `SYSTEM_REMINDER_PREFIX` | `messages/types.py:121` | Detection contract for the Anthropic adapter's cache breakpoint skip |
 
 ---
 
@@ -144,7 +146,8 @@ Conversely, the subsystems below depend on this package:
 
 - **Role alternation rule**: `tool_result` messages must have `role="user"`, and the first message of the conversation must also be user. `create_tool_result_message()` enforces this. On violation, the API rejects the request. See [06-invariants](06-invariants.md) for the detailed rules.
 - **Verbatim thinking echo**: the `thinking` block conversion in `normalize_for_api()` must never be omitted or altered. If missing, the API turn breaks ([06-invariants](06-invariants.md)).
-- **tool_result `<tool_use_error>` wrapping**: `create_tool_result_message(is_error=True)` wraps the `content` text in `<tool_use_error>...</tool_use_error>` (`messages/types.py:58`). This is a convention that lets the LLM recognize the error context, so do not change the tag arbitrarily.
+- **tool_result `<tool_use_error>` wrapping**: `create_tool_result_message(is_error=True)` wraps the `content` text in `<tool_use_error>...</tool_use_error>` (`messages/types.py:109`). This is a convention that lets the LLM recognize the error context, so do not change the tag arbitrarily.
+- **Single definition of the `<system-reminder>` tag**: the turn-local reminder tag is defined in exactly one place — `wrap_system_reminder()`/`SYSTEM_REMINDER_PREFIX` in `messages/types.py`. The producers (todo · memory index) and the Anthropic adapter's breakpoint-skip detection share this constant, so re-duplicating the literal silently breaks the cache skip.
 - **Do not abuse the `is_meta` flag**: `is_meta=True` messages are transparently removed in `normalize_for_api()`. Using it for anything other than loop-internal synthetic messages can drop messages that should reach the API.
 - **Name collision**: importing `ContentBlock` from `messages/types.py` and `ContentBlock` (Union alias) from `api/provider.py` in the same file causes a name collision. Disambiguate with an `as` alias when needed.
 

@@ -29,7 +29,7 @@ Core contract:
 
 ### Partitioning (`partition_tool_calls`)
 
-`orchestrator.py:68` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
+`orchestrator.py:67` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
 
 ```
 [RO, RO, RO, MUT, RO, RO]
@@ -41,19 +41,19 @@ Core contract:
 
 **Merge rule**: consecutive concurrency-safe blocks are merged into one parallel batch. A non-safe block always becomes its own batch.
 
-**Conservative fallback** (`orchestrator.py:41–65`): treated as non-safe if any of the following applies.
+**Conservative fallback** (`orchestrator.py:40–64`): treated as non-safe if any of the following applies.
 - Tool not found (unknown tool)
 - Input is `None`
 - Pydantic schema validation fails
 - `is_concurrency_safe()` itself raises an exception
 
-**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:41–65`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:63`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
+**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:40–64`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:62`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
 
 ---
 
 ### Execution Path — `run_tools`
 
-`orchestrator.py:145` / `core/loop.py:40,216` — the only execution path that `run_one_turn()` calls directly.
+`orchestrator.py:144` / `core/loop.py:40,261` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
 # core/loop.py
@@ -125,13 +125,13 @@ class WeatherTool(Tool):
         return ToolResult(data=f"{parsed.city}: sunny, 22°C")
 ```
 
-To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:41–65`) consults only this single predicate.
+To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:40–64`) consults only this single predicate.
 
 ---
 
 ### `Tool` Methods — Conservative Defaults
 
-`tools/base.py:51`
+`tools/base.py:139`
 
 | Method | Return Type | Default | Description |
 |---|---|---|---|
@@ -143,7 +143,7 @@ To be eligible for a parallel batch, `is_concurrency_safe()` just needs to retur
 
 ### `ToolResult`
 
-`tools/base.py:20`
+`tools/base.py:17`
 
 ```python
 ToolResult(
@@ -157,13 +157,18 @@ ToolResult(
 
 ### `get_tool_schema()`
 
-`tools/base.py:80` — inlines and removes `$defs` from the Pydantic v2 schema, removes the top-level `title`, then returns it in the form passed to the API. Inlining (`_inline_defs`) ensures nested models · enums (e.g. `TodoItem.status`) are exposed to the model as-is without dangling `$ref`s — otherwise only `$ref` remains and the model cannot see the enum constraint.
+`tools/base.py` — runs the Pydantic v2 schema through the wire-diet pipeline and returns it in the form passed to the API. Since the schema resides in the prefix of every call, bytes carrying zero information for the model are removed (validation is done by the Pydantic model — this schema is purely "documentation shown to the model", so semantics are unchanged):
+
+1. **`_inline_defs`** — inlines and removes `$defs`. Ensures nested models · enums (e.g. `TodoItem.status`) are exposed to the model as-is without dangling `$ref`s — otherwise only `$ref` remains and the model cannot see the enum constraint.
+2. **`_strip_titles`** — recursively removes pydantic's auto-generated cosmetic `title` (pure duplication, since the property name is already in the schema). Actual properties named `title` (dict values) are preserved.
+3. **`_slim_wire_schema`** — collapses the triple ceremony of `Optional[X] = None` (`anyOf: [X, {type: null}]` + `default: null`) into X and removes the null default ("not required" is already conveyed by absence from `required`). Non-null unions · meaningful defaults are preserved. Nested descriptions are dedented.
+4. **description precedence** — the `Tool.description` class attribute is the model-facing description; if unset, falls back to the docstring (backward compatibility). This is the separation point that keeps developer-facing implementation notes in the docstring from leaking onto the wire. Source indentation is removed via `_dedent_text`.
 
 ```python
 {
     "name": self.name,
-    "description": "...",
-    "input_schema": { ... }  # top-level title removed; $defs inlined then removed
+    "description": _dedent_text(self.description or docstring),
+    "input_schema": { ... }  # recursive title removal + Optional collapsing; $defs inlined then removed
 }
 ```
 
@@ -175,7 +180,7 @@ ToolResult(
 |---|---|---|
 | Uses | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | Uses | `pydantic` | Input schema validation (`model_validate`, `model_json_schema`) |
-| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:40,216`) |
+| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:40,261`) |
 
 ---
 
@@ -188,7 +193,7 @@ ToolResult(
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.
 
-**Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names. In addition, the active `MemoryStore`'s `tools()` (default `memory_save`/`memory_read`/`memory_delete`) are also always registered, and if a caller tool's name clashes with a built-in or memory tool name, `__init__` rejects it with `ValueError` (uniqueness check across all tool names).
+**Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names. In addition, when a store is mounted via `memory=` (opt-in), that `MemoryStore`'s `tools()` (default `memory_save`/`memory_read`/`memory_delete`) are also registered, and if a caller tool's name clashes with a built-in or memory tool name, `__init__` rejects it with `ValueError` (uniqueness check across all tool names).
 
 ---
 

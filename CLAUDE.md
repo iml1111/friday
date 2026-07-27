@@ -25,7 +25,7 @@ A **domain-agnostic + LLM-agnostic** SDK for **running agent loops on the cloud/
 6. `05-messages.md` — messages/conversion
 7. `06-invariants.md` — par-critical invariants
 8. `07-data-models.md` — catalog of all data models
-9. `08-memory.md` — persistent memory subsystem (always-on, `MemoryStore` replacement)
+9. `08-memory.md` — persistent memory subsystem (opt-in, `MemoryStore` injection)
 
 ## Architecture Big Picture
 
@@ -43,7 +43,7 @@ engine.step(state)       ┌─ run_one_turn once (async generator) ────
         │                │ → stream-yield Message…s in order              │
         │                │ → lastly yield one LoopState | Terminal        │
         │                │   sentinel                                     │
-        │                └──────────────────────────────────────────────┘
+        │                └────────────────────────────────────────────────┘
         │   on ContextOverflowError → caller runs engine.compact(state), then retries
         ▼
 Caller consumes via `async for`: if the last sentinel is a LoopState, call step() again with it as-is; if Terminal, stop.
@@ -76,7 +76,7 @@ The architecture docs intentionally describe only **"the essence of the agent lo
 Swapping the LLM backend is confined to **3 interfaces** (`docs/architecture/03-llm-providers.md`):
 - **`LLMProvider`** — the only *required* swap point. Performs the completion call + normalizes the response into `AssistantResponse`.
 - **`ToolExecutor`** / **`ContextManager`** — mostly generic (swap only the LLM call site).
-- **Memory is a separate subsystem** (not the LLM boundary) — `MemoryStore` in `friday_agent/memory/` (owns persistence + `tools()`). An always-on built-in, replaced via injection. Details: `docs/architecture/08-memory.md`.
+- **Memory is a separate subsystem** (not the LLM boundary) — `MemoryStore` in `friday_agent/memory/` (owns persistence + `tools()`). opt-in (not mounted by default); mounted when a store is injected. Details: `docs/architecture/08-memory.md`.
 
 For the vendor boundary and per-adapter differences, see the adapter differences table in `docs/architecture/03-llm-providers.md`.
 
@@ -92,9 +92,9 @@ Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `too
 ## Target Stack & Verification
 
 - **Python 3.11+**, `anthropic` + `openai` SDK + `pydantic` + `anyio`.
-- API keys: **external injection only** (required). The library does not read environment variables — pass the key directly to the adapter (`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`) when creating the provider. Key resolution (env→argument) and model prefix (claude-/gpt-)→adapter routing are both handled by the boundary layer `scripts/_env.py` (`resolve_api_key(model)`·`create_provider(model, api_key=...)`·`create_config(model, ...)`) — the library provides no routing factory. **`FridayAgent` takes the provider directly (required)** — there are no model/api_key arguments. Public API surface: `engine.step(state)` (single-turn async generator — yields Messages in order, then finally yields one `LoopState | Terminal` sentinel) + `engine.compact(state)` (caller-driven compact). The call config is passed directly as the vendor config (e.g. `AnthropicConfig(max_tokens=...)` or `provider.config_type(max_tokens=...)`; defaults to `provider.config_type()` if unspecified). `context_window`·`max_output_tokens` go to the adapter constructor, `max_concurrency` to `FridayAgent(...)`.
+- API keys: **external injection only** (required). The library does not read environment variables — pass the key directly to the adapter (`AnthropicProvider(api_key=...)`/`OpenAIProvider(api_key=...)`) when creating the provider. Key resolution (env→argument) and model prefix (claude-/gpt-)→adapter routing are both handled by the boundary layer `scripts/_env.py` (`resolve_api_key(model)`·`create_provider(model, api_key=...)`·`create_config(model, ...)`) — the library provides no routing factory. **`FridayAgent` takes the provider directly (required)** — there are no model/api_key arguments. Public API surface: `engine.step(state)` (single-turn async generator — yields Messages in order, then finally yields one `LoopState | Terminal` sentinel) + `engine.compact(state)` (caller-driven compact). The call config is passed directly as the vendor config (e.g. `AnthropicConfig(max_tokens=...)` or `provider.config_type(max_tokens=...)`; defaults to `provider.config_type()` if unspecified). `context_window`·`max_output_tokens` go to the adapter constructor, `max_concurrency` to `FridayAgent(...)`. Keep the context injection surface simple — static content is a single `system_prompt` string (composing sections is the caller's job), and there are no engine-level dynamic injection hooks. The compaction prompt is a separate surface that `system_prompt` does not reach, so it takes a single `compact_instructions` string separately (default `""` = prompt unchanged).
 - **Built-in todo always-injected**: the `TodoWrite` tool and todo guidance (`TODO_GUIDANCE`) are always auto-registered·injected as built-ins (no caller injection needed, no opt-out). If the caller passes a tool with the same name, `FridayAgent.__init__` rejects it with `ValueError`.
-- **Built-in memory always-injected**: the default `FileMemoryStore` (→`FRIDAY_MEMORY.md`) and `memory_save`/`memory_read`/`memory_delete` are always registered, and `MEMORY_INSTRUCTIONS`+the automatic index are injected into the system prompt in `step()`. If the caller injects via `FridayAgent(..., memory=MyStore())`, the store and tools are replaced wholesale. The core loop·`LoopState` serde are unchanged (the store is re-injected container-locally).
+- **memory is opt-in**: with `FridayAgent(memory=None)` (default), the memory subsystem is not mounted — none of the 3 tools (`memory_save`/`memory_read`/`memory_delete`), instructions, or index reminder. A store must be explicitly injected, e.g. `FridayAgent(..., memory=FileMemoryStore())`, to mount it (the store itself is the tool surface). When mounted, injection is split static/dynamic — `MEMORY_INSTRUCTIONS` (static instructions) goes into the system prompt in `step()`, and the live index is carried by `build_memory_reminder` as a turn-local `<system-reminder>` (`messages[-1]` only, non-persistent) (preserves the cache prefix). The core loop·`LoopState` serde are unchanged (the store is re-injected container-locally).
 - Phase verification: single tool (P1) → parallel tool batch (P2) → `ContextOverflowError` → caller recovery via `engine.compact(state)` (P3).
 
 ## Key Implementation Pitfalls
@@ -103,5 +103,5 @@ Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `too
 - The `role` of a `tool_result` message must be `"user"`, and the first message must also be user (role alternation rule).
 - `tool_use.input` arrives already parsed as a dict (per the Anthropic SDK) — do not JSON-parse it yourself. (However, the OpenAI adapter parses the JSON-string arguments and normalizes them to a dict — a vendor-specific difference.)
 - Do not send `temperature` when thinking is enabled. For an empty `tools=[]`, omit the field entirely.
-- Prompt caching is **always-on** (no opt-out·config knob): the Anthropic adapter's `_apply_cache_control` places `cache_control:{ephemeral}` on every call's last system block (=tools+system) + the last/second-to-last message blocks (system+tools prefix + conversation history cache). `messages[-2]` is the stable anchor — because the per-turn todo reminder is attached only to `messages[-1]`. OpenAI caches automatically, so its adapter is unchanged.
+- Prompt caching is **always-on** (no opt-out·config knob): the Anthropic adapter's `_apply_cache_control` places `cache_control:{ephemeral}` on every call's last system block (=tools+system) + the last **persistent** block of the last/second-to-last message (system+tools prefix + conversation history cache). Trailing `<system-reminder>` reminders are skipped — breakpoints on non-persistent blocks are not reusable. `messages[-2]` is the stable anchor — because per-turn reminders (todo·memory index) are attached only to `messages[-1]`. OpenAI caches automatically, so its adapter is unchanged.
 - Even with parallel execution, results are yielded **in tool_use block order** (`asyncio.gather` preserves argument order).

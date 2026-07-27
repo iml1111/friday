@@ -13,7 +13,7 @@ from friday_agent.memory.store import (
     MemoryEntry,
     MemoryStore,
     MemoryType,
-    build_memory_section,
+    build_memory_reminder,
 )
 from friday_agent.memory.tool import MemoryDelete, MemoryRead, MemorySave
 
@@ -27,5 +27,5 @@ __all__ = [
     "MemoryRead",
     "MemoryDelete",
     "MEMORY_INSTRUCTIONS",
-    "build_memory_section",
+    "build_memory_reminder",
 ]

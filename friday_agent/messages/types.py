@@ -110,3 +110,17 @@ def create_tool_result_message(
             is_error=is_error,
         )],
     )
+
+
+# Turn-local reminder protocol. Producers (render_todo_reminder in core/loop.py,
+# build_memory_reminder in memory/store.py) wrap reminder text via
+# wrap_system_reminder; the Anthropic adapter skips blocks starting with
+# SYSTEM_REMINDER_PREFIX when placing cache breakpoints — a breakpoint on a
+# non-persistent block creates a cache entry that never gets a hit. One
+# definition keeps producers and detector from drifting apart.
+SYSTEM_REMINDER_PREFIX = "<system-reminder>"
+
+
+def wrap_system_reminder(body: str) -> str:
+    """Wrap turn-local reminder text in the tag pair the cache-control skip detects."""
+    return f"{SYSTEM_REMINDER_PREFIX}\n{body}\n</system-reminder>"

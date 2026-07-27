@@ -27,13 +27,14 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 ## ③ Core Behavior — `run_one_turn()` Turn Lifecycle
 
-`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:114`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`Terminal` or `LoopState`) at the end and finishes.
+`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:167`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`Terminal` or `LoopState`) at the end and finishes.
 
 ### Execution Order
 
 ```
 1. api_input_messages = list(state.messages)
-      └─ if state.todos is set, inject <system-reminder> via with_todo_reminder() (API view only · non-persistent)
+      └─ inject <system-reminder> via with_turn_reminders() (API view only · non-persistent):
+         in order: [todo reminder (when state.todos is set)] + turn_reminders param (engine passes memory index)
       └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM call
 
 2. response → _to_assistant_message()     ← converted to internal Message, then yielded
@@ -60,7 +61,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 ### Backfill (`yield_missing_tool_result_blocks`)
 
-When a turn is aborted by `LLMError`, `friday_agent/core/loop.py:75` › `yield_missing_tool_result_blocks()` generates synthetic error `tool_result`s for tool_use blocks that have not yet received results, restoring integrity. See [06-invariants](06-invariants.md) for details.
+When a turn is aborted by `LLMError`, `friday_agent/core/loop.py:76` › `yield_missing_tool_result_blocks()` generates synthetic error `tool_result`s for tool_use blocks that have not yet received results, restoring integrity. See [06-invariants](06-invariants.md) for details.
 
 ---
 
@@ -75,11 +76,16 @@ FridayAgent(
     system_prompt="",
     config=None,           # if unset, provider.config_type() defaults
     max_concurrency=10,
-    memory=None,           # MemoryStore — if unset, default FileMemoryStore(); the store is the tool surface
+    memory=None,           # MemoryStore — if unset, memory subsystem not mounted (opt-in); the store is the tool surface
+    compact_instructions="",  # domain requirements to insert into the compact() summary prompt; empty string leaves the prompt unchanged
 )
 ```
 
-If `config` is not of type `provider.config_type`, `ValueError` is raised immediately (`friday_agent/core/engine.py:71`).
+If `config` is not of type `provider.config_type`, `ValueError` is raised immediately.
+
+The context injection surface is intentionally simple: static content is passed by the caller as a single `system_prompt` string (multiple sections are combined on the caller side with `"\n\n".join(...)`). The engine has no injection surface for dynamic (per-turn varying) content — only SDK internals (todo · memory index) use the turn-local reminder machinery (`turn_reminders` of `run_one_turn`).
+
+`system_prompt` is **turn-loop only** — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it. What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Terminal, None]`
 
@@ -112,7 +118,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 
 | Type | Defined At | Role |
 |---|---|---|
-| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:39` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
+| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:34` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
 | `Terminal(reason, error=None)` | `core/state.py:19` | Loop termination sentinel |
 
 ---
@@ -126,20 +132,20 @@ See [04-context-compaction](04-context-compaction.md) for details.
 | `friday_agent/api/provider.py` | `LLMProvider`, `LLMError`, `ContextOverflowError`, response block types |
 | `friday_agent/context/compact.py` | `compact_conversation()`, `create_compact_summary_message()` — implementation of `engine.compact()` |
 | `friday_agent/api/prompts.py` | `assemble_system_prompt()` — system prompt assembly + general behavior block injection |
-| `friday_agent/memory/store.py` | `build_memory_section()` — per-turn memory section assembly for `engine.step()`; default `FileMemoryStore`/`MemoryStore` types |
+| `friday_agent/memory/store.py` | `MEMORY_INSTRUCTIONS` (static instructions, for system) + `build_memory_reminder()` (per-turn index reminder); default `FileMemoryStore`/`MemoryStore` types |
 
 ---
 
 ## ⑥ Maintenance Notes
 
 - **Context window management is the caller's responsibility.** `step()` sends `state.messages` to the API as-is. When the token budget is exceeded it throws `ContextOverflowError`, so the caller must reduce via `engine.compact(state)` and retry.
-- **General behavior block auto-injection.** `run_one_turn()` **always** appends `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · reversibility of actions · conciseness, etc.) after the caller's `system_prompt` when sending (`loop.py:166` › `assemble_system_prompt()`). There is no opt-out flag. The compaction summary call (`engine.compact()`) does not go through this path, so the general block does not leak into the summary.
+- **General behavior block auto-injection.** `run_one_turn()` **always** injects `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · reversibility of actions · conciseness, etc.) **before** the caller's `system_prompt` when sending (`assemble_system_prompt()`). Order is general→specific — the domain prompt comes last so its rules override the general guidance via recency. There is no opt-out flag. The compaction summary call (`engine.compact()`) does not go through this path, so the general block does not leak into the summary.
 - **TodoWrite tool · guidance auto-injection (built-in).** `FridayAgent` always merges the tools from `builtin_tools()` (`tools/builtin/__init__.py`) into the caller's tools, and `assemble_system_prompt()` always appends `TODO_GUIDANCE` (no opt-out). If the caller injects a tool with the same name as a built-in, `FridayAgent.__init__` rejects it with `ValueError`. The compaction summary does not go through this prompt path, so `TODO_GUIDANCE` does not leak into the summary.
-- **Memory section injection (built-in).** Every turn, `engine.step()` assembles `build_memory_section(self._memory)` (rebuilt per turn, no caching) and appends it after the base system prompt. `compact()` does not go through this path, so the memory index does not leak into the summary. `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. From the prompt caching (always-on) perspective, this section sits inside the cached system prefix — the index has no timestamps, so read-only turns are byte-stable (cache hit), but when `memory_save`/`delete` changes the index, the next turn's system tier is rewritten once (reads cause no invalidation). The default store is `FileMemoryStore`, replaced via `FridayAgent(..., memory=...)`. See [08-memory](08-memory.md) for details.
+- **Memory prompt injection (opt-in, static/dynamic split).** Only when a `memory=` store is mounted: `engine.step()` places the static instructions `MEMORY_INSTRUCTIONS` before the base system prompt (general→specific, byte-stable within a session), and renders the live index every turn via `build_memory_reminder(self._memory)`, carrying it as a turn-local reminder (`turn_reminders` path) on `messages[-1]` only. With `memory=None` (default), this entire path is skipped. `compact()` does not go through this path, so the memory index does not leak into the summary. `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. From the prompt caching (always-on) perspective: even when `memory_save`/`delete` changes the index, the system prefix · conversation history caches survive — only the reminder block outside the breakpoints changes (putting the index in system would invalidate the whole conversation cache on a single save). See [08-memory](08-memory.md) for details.
 - **`tool_use↔tool_result` pair preservation.** On the `LLMError` path, backfill (`yield_missing_tool_result_blocks`) kicks in to prevent LLM API rejection. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
-- **Per-turn todo reminders are non-persistent.** When `state.todos` is non-empty, every turn `run_one_turn()` merges a `<system-reminder>` into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state).
+- **Per-turn reminders are non-persistent.** Every turn, `run_one_turn()` uses `with_turn_reminders()` to merge `<system-reminder>` blocks (todo reminder + caller-provided `turn_reminders`) into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting.
 
 ---
 

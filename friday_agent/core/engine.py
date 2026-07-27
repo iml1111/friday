@@ -13,7 +13,11 @@ from typing import AsyncGenerator
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
-from friday_agent.memory.store import FileMemoryStore, MemoryStore, build_memory_section
+from friday_agent.memory.store import (
+    MEMORY_INSTRUCTIONS,
+    MemoryStore,
+    build_memory_reminder,
+)
 from friday_agent.core.loop import run_one_turn
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
@@ -39,6 +43,15 @@ class FridayAgent:
                 Defaults to the provider's default config (provider.config_type())
                 when None.
         max_concurrency: Maximum concurrent tool executions (default 10).
+        memory: Optional MemoryStore. When None (the default), the memory
+                subsystem is not mounted: no memory tools, no MEMORY_INSTRUCTIONS
+                system section, no per-turn index reminder. Pass a store
+                (e.g. FileMemoryStore()) to opt in.
+        compact_instructions: Domain requirements folded into the compaction
+                prompt used by compact(). system_prompt does not reach that call
+                (summarization runs under its own summarizer system prompt), so
+                this is the only way to steer what a summary must preserve.
+                Empty (the default) leaves the base prompt untouched.
 
     Raises:
         ValueError: When config is given but its type does not match the
@@ -53,6 +66,7 @@ class FridayAgent:
         config: LLMConfig | None = None,
         max_concurrency: int = 10,
         memory: MemoryStore | None = None,
+        compact_instructions: str = "",
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -64,21 +78,23 @@ class FridayAgent:
                 f"{type(config).__name__}. Match the config type to the model vendor."
             )
 
-        self._memory = memory if memory is not None else FileMemoryStore()
+        self._memory = memory
         caller_tools = tools if tools is not None else []
-        assembled = [*caller_tools, *builtin_tools(), *self._memory.tools()]
+        memory_tools = self._memory.tools() if self._memory is not None else []
+        assembled = [*caller_tools, *builtin_tools(), *memory_tools]
         dups = sorted(n for n, c in Counter(t.name for t in assembled).items() if c > 1)
         if dups:
             raise ValueError(
-                f"FridayAgent: duplicate tool names {dups}. TodoWrite and the "
-                f"active MemoryStore's tools are SDK-managed and always registered; remove "
-                f"the colliding tool(s) or override the store's tools()."
+                f"FridayAgent: duplicate tool names {dups}. TodoWrite (and the "
+                f"mounted MemoryStore's tools, when memory is passed) are SDK-managed; "
+                f"remove the colliding tool(s) or override the store's tools()."
             )
         self._provider = provider
         self._tools = assembled
         self._system_prompt = system_prompt
         self._config = config
         self._max_concurrency = max_concurrency
+        self._compact_instructions = compact_instructions
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -97,15 +113,18 @@ class FridayAgent:
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
-        # Rebuilt every turn from the store. In the distributed model the caller
-        # reconstructs the engine each turn, so caching this would never be reused;
-        # rebuilding keeps single-process behavior identical (index fresh per turn).
-        memory_section = await build_memory_section(self._memory)
-        effective_prompt = (
-            f"{self._system_prompt}\n\n{memory_section}"
-            if self._system_prompt
-            else memory_section
+        # System prefix: static pieces only, ordered generic -> specific
+        # (memory instructions -> domain prompt) — must be byte-stable within a
+        # session so the cache prefix survives. The live memory index is rebuilt
+        # every turn and rides messages[-1] as a turn-local reminder instead —
+        # in the system prompt it would invalidate the whole conversation cache.
+        memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
+        parts = [p for p in (memory_section, self._system_prompt) if p]
+        effective_prompt = "\n\n".join(parts)
+        turn_reminders = (
+            [await build_memory_reminder(self._memory)] if self._memory is not None else []
         )
+        turn_reminders = [t for t in turn_reminders if t]
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(
             provider=self._provider,
@@ -115,6 +134,7 @@ class FridayAgent:
             system_prompt=effective_prompt,
             config=self._config,
             max_concurrency=self._max_concurrency,
+            turn_reminders=turn_reminders,
         ):
             yield item
 
@@ -126,11 +146,16 @@ class FridayAgent:
         state.messages with a single summary message, then retry. (After the
         caller-owned-compaction refactor, step() surfaces this as a raised
         ContextOverflowError.) turn_count is preserved for observability.
+
+        The summarizer runs under SUMMARIZER_SYSTEM_PROMPT, not system_prompt —
+        compact_instructions (constructor) is the injection point for domain
+        requirements about what the summary must preserve.
         """
         api_messages = normalize_for_api(state.messages)
         summary_text = await compact_conversation(
             provider=self._provider,
             messages=api_messages,
+            extra_instructions=self._compact_instructions,
         )
         summary_message = create_compact_summary_message(summary_text)
         return LoopState(
