@@ -2906,13 +2906,14 @@ EOF
 git show --stat HEAD
 ```
 
-- [ ] **Step 5: Remove the working spec and plan**
+- [ ] **Step 5: Remove the working spec, the plan, and the progress note** — first delete the whole `## In-Progress Work — `refactor/loop-contracts` (remove when done)` section from `CLAUDE.md` (heading through its last bullet), then:
 
 ```bash
 git rev-parse --abbrev-ref HEAD
 git rm docs/superpowers/specs/2026-10-03-loop-contracts-design.md docs/superpowers/plans/2026-10-03-loop-contracts.md
-git commit -F - -- docs/superpowers/specs/2026-10-03-loop-contracts-design.md docs/superpowers/plans/2026-10-03-loop-contracts.md <<'EOF'
-chore: drop the working spec and plan
+git add CLAUDE.md
+git commit -F - -- docs/superpowers/specs/2026-10-03-loop-contracts-design.md docs/superpowers/plans/2026-10-03-loop-contracts.md CLAUDE.md <<'EOF'
+chore: drop the working spec, plan and progress note
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01JRQLSczEWcmgFp8vJsUs9q

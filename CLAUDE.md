@@ -12,6 +12,16 @@ A **domain-agnostic + LLM-agnostic** SDK for **running agent loops on the cloud/
 - Real API verification (incurs token cost): `LLM_MODEL=<model-id> python scripts/verify/verify_p2.py` (P2~P4)
 - For code entry points · module map · reading order, see `docs/architecture/00-overview.md` (especially `#module-map`).
 
+## In-Progress Work — `refactor/loop-contracts` (remove when done)
+
+Branch `refactor/loop-contracts` adds seven loop-contract changes: a summary-tag fix, `Terminal.state`, an OpenAI tool-message ordering fix, `turn_sections`, image tool results, deferred tools (`Suspended`/`resume`), and `compact(reuse_prefix=)`.
+
+- **Spec** (approved): `docs/superpowers/specs/2026-10-03-loop-contracts-design.md` — the decisions and their reasons (D1–D15).
+- **Plan** (written, awaiting the user's review): `docs/superpowers/plans/2026-10-03-loop-contracts.md` — 12 tasks with code, tests, doc edits, and commit commands. Its Global Constraints apply to every task.
+- **Status**: spec and plan committed; Task 1 not started. The user has not chosen an execution method yet — ask first (recommended: native, i.e. `superpowers:executing-plans` in order, then one fresh whole-branch review).
+- **Resume**: on `refactor/loop-contracts`, confirm `python -m pytest -q` → 253 passed, then start at Task 1.
+- Task 11 (real-API checks) needs the user's go-ahead (token cost). Task 12 deletes the spec, the plan, and this section.
+
 ## Architecture Docs = Single Source of Truth
 
 `docs/architecture/` is the authoritative documentation describing the current implementation (`friday_agent/`) subsystem by subsystem. Implementation and maintenance are based on these docs.
