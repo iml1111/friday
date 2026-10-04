@@ -134,14 +134,12 @@ class FridayAgent:
 
         Raises:
             PendingToolUseError: the state still has unanswered tool_use blocks —
-                checked before anything else (no request sent).
+                raised by run_one_turn before any request.
             ContextOverflowError: propagated from run_one_turn during iteration when the
                 provider rejects the messages as too long. The caller shrinks the
                 state and retries — compact() re-sends this same prefix, so trim
                 the oldest turns first (see compact()).
         """
-        if pending := pending_tool_uses(state):
-            raise PendingToolUseError([block.id or "" for block in pending])
         # Per-turn content (the live memory index, then the caller's
         # turn_sections) rides messages[-1] as turn-local reminders — in the
         # system prompt it would invalidate the whole conversation cache.
