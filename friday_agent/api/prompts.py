@@ -84,10 +84,11 @@ def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
 #     request; a tool_use reply is retried once with tools=[], where both
 #     adapters omit the field and a tool_use is impossible.
 #   - Analysis instructions + the nine summary sections.
-#   - {domain_requirements}: the caller's compact_instructions. FridayAgent.compact
-#     fills it with "" (the prompt is then the base prompt, byte for byte) or with
-#     a precedence header, the instructions and a blank line — so domain rules can
-#     both add sections and redefine generic ones without forking the prompt.
+#   - {domain_requirements}: the caller's compact_instructions, filled by
+#     format_compact_prompt with "" (the prompt is then the base prompt, byte for
+#     byte) or with a precedence header, the instructions and a blank line — so
+#     domain rules can both add sections and redefine generic ones without
+#     forking the prompt.
 #   - Output format + REMINDER: must stay last. It carries the <analysis>/<summary>
 #     output contract, and recency is what makes the model honor it; a reply
 #     without the tags falls back to the raw text, leaking the scratchpad.
@@ -116,6 +117,16 @@ Your summary should include the following sections:
 
 REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."""
 
+
+def format_compact_prompt(compact_instructions: str = "") -> str:
+    """COMPACT_PROMPT with compact_instructions in its slot (blank = the base prompt)."""
+    extra = compact_instructions.strip()
+    domain_requirements = (
+        "Domain-specific requirements for this summary (these take precedence over "
+        f"the generic sections above):\n{extra}\n\n"
+    ) if extra else ""
+    return COMPACT_PROMPT.format(domain_requirements=domain_requirements)
+
 # The user message that replaces the history: continuation framing (the session
 # resumes after a context cutoff), the extracted summary, then a resume-directly
 # directive (pick up the work without re-acknowledging the summary).
@@ -128,3 +139,8 @@ COMPACT_SUMMARY_MESSAGE: str = (
     "what was happening, do not preface with \"I'll continue\" or similar. Pick up the "
     "last task as if the break never happened."
 )
+
+
+def format_compact_summary_message(summary: str) -> str:
+    """COMPACT_SUMMARY_MESSAGE around the extracted summary."""
+    return COMPACT_SUMMARY_MESSAGE.format(summary=summary)

@@ -10,7 +10,7 @@ Verifies the step() API and the tests/_drive.py driver:
 import pytest
 
 from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
-from friday_agent.api.prompts import COMPACT_PROMPT
+from friday_agent.api.prompts import format_compact_prompt
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
@@ -227,4 +227,4 @@ async def test_compact_without_instructions_sends_base_prompt():
 
     await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
 
-    assert fake.received_messages[0][-1]["content"] == COMPACT_PROMPT.format(domain_requirements="")
+    assert fake.received_messages[0][-1]["content"] == format_compact_prompt()

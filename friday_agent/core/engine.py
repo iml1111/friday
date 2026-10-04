@@ -13,7 +13,7 @@ import copy
 from collections import Counter
 from typing import AsyncGenerator, Awaitable, Callable
 
-from friday_agent.api.prompts import COMPACT_PROMPT, COMPACT_SUMMARY_MESSAGE, assemble_system_prompt
+from friday_agent.api.prompts import assemble_system_prompt, format_compact_prompt, format_compact_summary_message
 from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolUseBlock
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
@@ -203,14 +203,9 @@ class FridayAgent:
         """
         if pending := pending_tool_uses(state):
             raise PendingToolUseError([block.id or "" for block in pending])
-        extra = self._compact_instructions.strip()
-        domain_requirements = (
-            "Domain-specific requirements for this summary (these take precedence over "
-            f"the generic sections above):\n{extra}\n\n"
-        ) if extra else ""
         messages = [
             *normalize_for_api(state.messages),
-            {"role": "user", "content": COMPACT_PROMPT.format(domain_requirements=domain_requirements)},
+            {"role": "user", "content": format_compact_prompt(self._compact_instructions)},
         ]
         system_prompt = str(assemble_system_prompt(self._effective_system_prompt()))
         # Same config as step() (the message cache keys on settings such as
@@ -233,7 +228,7 @@ class FridayAgent:
         # No usable <summary> pair — keep the full response as a best-effort fallback.
         summary_text = self._extract_summary(raw_text) or raw_text.strip()
         summary_message = create_user_message(
-            content=COMPACT_SUMMARY_MESSAGE.format(summary=summary_text), is_compact_summary=True,
+            content=format_compact_summary_message(summary_text), is_compact_summary=True,
         )
         return LoopState(messages=[summary_message], turn_count=state.turn_count, todos=state.todos)
 

@@ -1,7 +1,7 @@
 """Tests for compaction — the prompt texts (api/prompts.py) and what engine.compact() sends and builds."""
 import pytest
 
-from friday_agent.api.prompts import COMPACT_PROMPT
+from friday_agent.api.prompts import format_compact_prompt
 from friday_agent.api.provider import (
     AssistantResponse,
     StopReason,
@@ -13,7 +13,7 @@ from friday_agent.core.state import LoopState
 from friday_agent.messages.types import Message, create_user_message
 from tests.fakes import FakeLLMProvider
 
-BASE_PROMPT = COMPACT_PROMPT.format(domain_requirements="")
+BASE_PROMPT = format_compact_prompt()
 
 
 def _summary_response(text: str = "<summary>s</summary>") -> AssistantResponse:
@@ -38,11 +38,11 @@ async def _sent_prompt(compact_instructions: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# COMPACT_PROMPT text
+# Compaction prompt text
 # ---------------------------------------------------------------------------
 
 def test_compact_prompt_has_enriched_structure():
-    """COMPACT_PROMPT carries strong no-tools framing, analysis instruction,
+    """The compaction prompt carries strong no-tools framing, analysis instruction,
     all 9 sections, and the <analysis>/<summary> format — generalized (no dev-only phrasing)."""
     assert "Do NOT call any tools" in BASE_PROMPT
     assert "<analysis>" in BASE_PROMPT and "<summary>" in BASE_PROMPT
