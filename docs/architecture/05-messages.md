@@ -95,11 +95,11 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 
 Converts the internal `Message` list into the `{"role": str, "content": list[dict]}` format the LLM API accepts.
 
-**3-stage filter** (applied in order):
+**Filters** (applied in order):
 
 1. Exclude `is_meta=True` messages — synthetic messages internal to the loop are not sent to the API.
 2. Exclude messages with an empty `role` — system-internal messages have no wire role.
-3. Exclude messages with empty `content` — the API rejects empty content.
+3. Exclude messages left with no content after block conversion (an empty `content`, or only blocks that convert to nothing) — the API rejects empty content.
 
 **Block conversion rules** (`_convert_content_blocks()`):
 
