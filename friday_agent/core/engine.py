@@ -9,12 +9,13 @@ sentinel is a Terminal.
 """
 from __future__ import annotations
 
+import copy
 from collections import Counter
 from typing import AsyncGenerator, Awaitable, Callable
 
 from friday_agent.api.prompts import assemble_system_prompt
-from friday_agent.api.provider import LLMConfig, LLMProvider
-from friday_agent.context.compact import compact_conversation, create_compact_summary_message
+from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolUseBlock
+from friday_agent.context.compact import build_compact_prompt, create_compact_summary_message
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     MemoryStore,
@@ -183,7 +184,7 @@ class FridayAgent:
         and todos are preserved.
 
         The summary call sends exactly the system prompt, tool schemas and config
-        step() sends (max_tokens raised to the summary budget), so the provider
+        step() sends (max_tokens raised to at least 20,000), so the provider
         serves the conversation from its prompt cache instead of writing it again.
         A reply that calls a tool or lacks a usable <summary> is retried once with
         tools=[]. compact_instructions (constructor) is the injection point for
@@ -203,17 +204,60 @@ class FridayAgent:
         """
         if pending := pending_tool_uses(state):
             raise PendingToolUseError([block.id or "" for block in pending])
-        summary_text = await compact_conversation(
-            provider=self._provider,
-            messages=normalize_for_api(state.messages),
-            system_prompt=str(assemble_system_prompt(self._effective_system_prompt())),
-            tools=self._tool_schemas(),
-            config=self._config,
-            extra_instructions=self._compact_instructions,
+        messages = [
+            *normalize_for_api(state.messages),
+            {"role": "user", "content": build_compact_prompt(self._compact_instructions)},
+        ]
+        system_prompt = str(assemble_system_prompt(self._effective_system_prompt()))
+        # Same config as step() (the message cache keys on settings such as
+        # thinking); only the output budget is raised for the summary.
+        config = copy.copy(self._config)
+        config.max_tokens = max(self._config.max_tokens, 20_000)
+
+        response = await self._provider.complete(
+            messages=messages, system_prompt=system_prompt, tools=self._tool_schemas(), config=config,
         )
-        summary_message = create_compact_summary_message(summary_text)
+        if self._has_tool_use(response) or self._extract_summary(self._response_text(response)) is None:
+            # The shared prefix exposes the agent's tools: a tool call (or a reply
+            # with no summary) is retried once without them — the only call that
+            # pays the full price for the history. A tool_use never enters state.
+            response = await self._provider.complete(
+                messages=messages, system_prompt=system_prompt, tools=[], config=config,
+            )
+
+        raw_text = self._response_text(response)
+        # No usable <summary> pair — keep the full response as a best-effort fallback.
+        summary_text = self._extract_summary(raw_text) or raw_text.strip()
         return LoopState(
-            messages=[summary_message],
+            messages=[create_compact_summary_message(summary_text)],
             turn_count=state.turn_count,
             todos=state.todos,
         )
+
+    @staticmethod
+    def _response_text(response: AssistantResponse) -> str:
+        """Concatenate the response's text blocks."""
+        return "".join(block.text for block in response.content if getattr(block, "text", None))
+
+    @staticmethod
+    def _has_tool_use(response: AssistantResponse) -> bool:
+        return any(isinstance(block, ToolUseBlock) for block in response.content)
+
+    @staticmethod
+    def _extract_summary(raw_text: str) -> str | None:
+        """Return the text inside ``<summary>``, or None if there is no usable pair.
+
+        The closing tag is searched for only *after* the opening tag: a summarizer
+        that closes its ``<analysis>`` block with ``</summary>`` by mistake puts a
+        closing tag ahead of the real opening one, and pairing the first of each
+        yields an empty summary. An empty body is reported as a miss as well, so
+        compact() falls back instead of replacing the history with nothing.
+        """
+        start = raw_text.find("<summary>")
+        if start == -1:
+            return None
+        start += len("<summary>")
+        end = raw_text.find("</summary>", start)
+        if end == -1:
+            return None
+        return raw_text[start:end].strip() or None

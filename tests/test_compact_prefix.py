@@ -2,7 +2,7 @@
 import pytest
 
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
-from friday_agent.context.compact import COMPACT_PROMPT, MAX_OUTPUT_TOKENS_FOR_SUMMARY, compact_conversation
+from friday_agent.context.compact import COMPACT_PROMPT
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState
 from friday_agent.memory.store import MemoryEntry, MemoryType
@@ -68,7 +68,7 @@ async def test_summary_call_inherits_agent_config_with_summary_output_budget():
 
     sent = fake.received_configs[1]
     assert sent.temperature == 0.3
-    assert sent.max_tokens == MAX_OUTPUT_TOKENS_FOR_SUMMARY
+    assert sent.max_tokens == 20_000
     assert agent_config.max_tokens == 1000  # the agent's own config is untouched
 
 
@@ -109,22 +109,6 @@ async def test_missing_summary_retries_once_without_tools():
 
     assert fake.call_count == 3
     assert "SECOND" in _summary_text(compacted)
-
-
-@pytest.mark.asyncio
-async def test_compact_conversation_without_tools_never_retries():
-    fake = FakeLLMProvider(responses=[_text("no tags at all")])
-
-    result = await compact_conversation(
-        provider=fake,
-        messages=[{"role": "user", "content": "x"}],
-        system_prompt="SYS",
-        tools=[],
-        config=FakeConfig(),
-    )
-
-    assert result == "no tags at all"
-    assert fake.call_count == 1
 
 
 @pytest.mark.asyncio

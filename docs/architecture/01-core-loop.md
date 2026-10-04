@@ -160,7 +160,7 @@ async for item in engine.step(state): ...        # the next turn, as usual
 | `friday_agent/messages/normalize.py` | `normalize_for_api()` — internal Message → API payload conversion |
 | `friday_agent/tools/orchestrator.py` | `run_tools()` — parallel tool execution |
 | `friday_agent/api/provider.py` | `LLMProvider`, `LLMError`, `ContextOverflowError`, response block types |
-| `friday_agent/context/compact.py` | `compact_conversation()`, `create_compact_summary_message()` — implementation of `engine.compact()` |
+| `friday_agent/context/compact.py` | `build_compact_prompt()`, `create_compact_summary_message()` — prompt and summary message for `engine.compact()` |
 | `friday_agent/api/prompts.py` | `assemble_system_prompt()` — system prompt assembly + general behavior block injection |
 | `friday_agent/memory/store.py` | `MEMORY_INSTRUCTIONS` (static instructions, for system) + `build_memory_reminder()` (per-turn index reminder); default `FileMemoryStore`/`MemoryStore` types |
 
