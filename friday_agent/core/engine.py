@@ -3,8 +3,9 @@
 Holds the provider, tools, and call configuration, and exposes step(state): an
 async generator that yields each Message produced during the turn (assistant
 response, then each tool_result) and finally yields exactly one sentinel —
-the next LoopState (loop may continue) or Terminal (loop has ended). The caller
-drives the turn loop by calling step() until the sentinel is a Terminal.
+the next LoopState (continue), Suspended (paused on deferred tool calls) or
+Terminal (ended). The caller drives the turn loop by calling step() until the
+sentinel is a Terminal.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from friday_agent.memory.store import (
     build_memory_reminder,
 )
 from friday_agent.core.loop import pending_tool_uses, run_one_turn
-from friday_agent.core.state import LoopState, PendingToolUseError, Terminal
+from friday_agent.core.state import LoopState, PendingToolUseError, Suspended, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import Message, wrap_system_reminder
 from friday_agent.tools.base import Tool
@@ -111,12 +112,14 @@ class FridayAgent:
         self._compact_instructions = compact_instructions
         self._turn_sections = list(turn_sections or [])
 
-    async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
+    async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
 
         Yields every Message emitted during the turn (assistant response, then each
         tool_result) immediately, then yields exactly one final sentinel: the next
-        LoopState (loop may continue) or a Terminal (loop ended).
+        LoopState (continue), Suspended (paused on deferred tool calls — attach
+        their results with resume(), then step() again), or a Terminal (ended;
+        terminal.state is the state to keep).
         Thin passthrough over run_one_turn bound to this engine's provider/tools/config.
 
         The state may have been serialized and restored across containers, so this is

@@ -242,11 +242,12 @@ So getting the LLM to recognize a tool "well" comes down to **writing these thre
 
 #### Execution Policy Methods Are Not Sent to the LLM
 
-`is_concurrency_safe` is **not included** in
+`is_concurrency_safe` and `is_deferred` are **not included** in
 the schema. It is not for the model's awareness — it is a runtime signal by which **the orchestrator controls execution**:
 
 > Only tools whose `is_concurrency_safe()` is `True` run in a parallel batch (read-only tools are the typical example).
 > Tools that change external state (mutating) return `False` from `is_concurrency_safe()` and run sequentially.
+> A tool whose `is_deferred()` is `True` is not run by `step()` at all — its result arrives later (see [Deferred Tools](#deferred-tools-results-that-arrive-later)).
 > For tool partitioning details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
 
 ### ② LLM Backend (LLMProvider)
@@ -352,3 +353,32 @@ async for item in engine.step(state):           # next turn … repeat until Ter
 ```
 
 Because the loop state is only ever updated at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `LoopState` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
+
+### Deferred Tools (results that arrive later)
+
+Some results cannot be produced inside `step()` — a human approval, a job that runs elsewhere. Mark the tool deferred and the turn pauses instead of waiting:
+
+```python
+from friday_agent.core.loop import pending_tool_uses, resume
+from friday_agent.core.state import Suspended
+
+class SendEmail(Tool):
+    ...
+    def is_deferred(self, input: dict) -> bool:
+        return True                                   # step() will not run it
+
+# Request handler — the turn ends with Suspended
+async for item in engine.step(state):
+    outcome = item
+if isinstance(outcome, Suspended):
+    save(json.dumps(outcome.state.to_dict()))         # other tools' results are already in it
+    for call in outcome.pending:                      # deferred tool_use blocks (id, name, input)
+        request_approval(call.id, call.input)
+
+# Hours later, any process (no provider needed)
+state = LoopState.from_dict(json.loads(load()))
+state = resume(state, {call_id: ToolResult(data="Sent.")})   # or ToolResult(..., is_error=True) to cancel
+save(json.dumps(state.to_dict()))                     # then run the next turn with engine.step(state)
+```
+
+Calling `step()` on a state that still has unanswered calls raises `PendingToolUseError` before any request.

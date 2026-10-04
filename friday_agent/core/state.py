@@ -1,15 +1,16 @@
 """Loop state dataclasses.
 
 Defines the data structures passed across iterations of the agent loop:
-Terminal (loop exit) and LoopState — the serializable loop state, which also
-serves as the "continue" sentinel and the transport unit for distributed resume.
+Terminal (loop exit), Suspended (paused on deferred tool calls), and LoopState —
+the serializable loop state, which also serves as the "continue" sentinel and the
+transport unit for distributed resume.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday_agent.messages.types import Message
+from friday_agent.messages.types import ContentBlock, Message
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +65,24 @@ class LoopState:
             turn_count=d.get("turn_count", 1),
             todos=d.get("todos", []),
         )
+
+
+# ---------------------------------------------------------------------------
+# Suspended — the turn paused on deferred tool calls
+# ---------------------------------------------------------------------------
+@dataclass
+class Suspended:
+    """Returned when a turn ends waiting on deferred tool calls.
+
+    state   — the state to persist: input messages + the assistant message +
+              results of the calls that ran; turn_count/todos advanced as in
+              any tool turn. Serialize it like any LoopState.
+    pending — the deferred tool_use blocks (tool_use order) whose results the
+              caller produces elsewhere and attaches with resume(). Recomputable
+              from state alone via pending_tool_uses(), so it is not serialized.
+    """
+    state: LoopState
+    pending: list[ContentBlock]
 
 
 # ---------------------------------------------------------------------------

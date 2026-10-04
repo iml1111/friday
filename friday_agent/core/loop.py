@@ -6,11 +6,13 @@ provider's ContextOverflowError propagates to the caller (caller-owned
 compaction). The only other error path — an LLMError from the provider call —
 fires before any assistant message exists, so no tool_use is ever left unpaired.
 
-A turn ends by yielding exactly one sentinel: Terminal (loop done; carries the
-state to persist) or the next LoopState (loop may continue). The caller drives
-the turn loop by calling run_one_turn() in a while-true, advancing state on each
-LoopState until a Terminal appears — there is no batch driver and no internal
-compaction.
+A turn ends by yielding exactly one sentinel, each carrying the state to
+persist: the next LoopState (continue), Suspended (the response called
+deferred tools; the other calls ran, and the deferred results arrive later via
+resume()), or Terminal (done). The caller drives the turn loop by calling
+run_one_turn() in a while-true — there is no batch driver and no internal
+compaction. pending_tool_uses() and resume() are pure state functions (no
+provider, no tools), so any process can attach late results.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from friday_agent.api.provider import (
     ToolUseBlock,
 )
 from friday_agent.api.prompts import assemble_system_prompt
-from friday_agent.core.state import LoopState, PendingToolUseError, Terminal
+from friday_agent.core.state import LoopState, PendingToolUseError, Suspended, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import (
     ContentBlock,
@@ -36,8 +38,8 @@ from friday_agent.messages.types import (
     create_user_message,
     wrap_system_reminder,
 )
-from friday_agent.tools.base import Tool
-from friday_agent.tools.orchestrator import run_tools
+from friday_agent.tools.base import Tool, ToolResult
+from friday_agent.tools.orchestrator import is_deferred_call, run_tools, to_tool_result_message
 
 
 def _to_assistant_message(response: AssistantResponse) -> Message:
@@ -167,13 +169,15 @@ async def run_one_turn(
     config: LLMConfig | None = None,
     max_concurrency: int = 10,
     turn_reminders: list[str] | None = None,
-) -> AsyncGenerator[Message | Terminal | LoopState, None]:
+) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]:
     """Execute a single turn of the agent loop.
 
     Yields all Messages produced in this turn, then yields exactly one sentinel:
+      - LoopState: loop continues — the updated state for the next turn.
+      - Suspended: the response called deferred tools; the other calls ran, and
+        Suspended.state waits for the deferred results (attach with resume()).
       - Terminal: loop ends (completed / model_error); Terminal.state is the
         state to persist.
-      - LoopState: loop continues (next_turn) — the updated state for the next turn.
 
     Args:
         provider: LLM backend; only complete() is called.
@@ -189,8 +193,9 @@ async def run_one_turn(
 
     Yields:
         Message: messages produced this turn (assistant response, tool_result messages).
-        Terminal | LoopState: exactly one sentinel as the final yield —
-            Terminal when the loop ends, LoopState when it continues.
+        LoopState | Suspended | Terminal: exactly one sentinel as the final yield —
+            LoopState when it continues, Suspended when it waits on deferred
+            calls, Terminal when the loop ends.
 
     Raises:
         PendingToolUseError: when state still has unanswered tool_use blocks
@@ -252,19 +257,70 @@ async def run_one_turn(
         )
         return
 
-    # Execute all tool_use blocks, collecting results and declarative state effects.
+    # Deferred calls wait for an external result; every other call runs now.
+    held = [is_deferred_call(block, tools) for block in tool_use_blocks]
+    deferred = [block for block, h in zip(tool_use_blocks, held) if h]
+    immediate = [block for block, h in zip(tool_use_blocks, held) if not h]
+
     effects: list[dict] = []
     tool_results: list[Message] = []
     async for result_msg in run_tools(
-        tool_use_blocks, tools, max_concurrency=max_concurrency, effects_sink=effects
+        immediate, tools, max_concurrency=max_concurrency, effects_sink=effects
     ):
         tool_results.append(result_msg)
         yield result_msg
 
-    # Continuation: assemble the next-turn LoopState from the CLEAN state.messages
-    # (NOT api_input_messages) so the turn-local reminder is never persisted.
-    yield LoopState(
+    # Assemble the next state from the CLEAN state.messages (NOT
+    # api_input_messages) so the turn-local reminders are never persisted.
+    next_state = LoopState(
         messages=[*state.messages, message, *tool_results],
         turn_count=state.turn_count + 1,
+        todos=apply_state_effects(state.todos, effects),
+    )
+    yield Suspended(state=next_state, pending=deferred) if deferred else next_state
+
+
+def _answers(msg: Message, order: dict[str, int]) -> bool:
+    """Whether msg is a tool_result-only message answering a call in `order`."""
+    return bool(msg.content) and all(
+        block.type == "tool_result" and block.tool_use_id in order for block in msg.content
+    )
+
+
+def resume(state: LoopState, results: dict[str, ToolResult]) -> LoopState:
+    """Attach externally produced results to a suspended state. Never calls the model.
+
+    Each result becomes a tool_result message through the same conversion
+    run_tools uses (to_tool_result_message — errors and images behave
+    identically), and state_effects are applied in tool_use order. All results
+    for the last assistant message end up in tool_use order, ahead of any other
+    trailing message (tool results must precede text in a user turn — this also
+    repairs a state that got a user message appended before resume). Partial
+    results are allowed: the rest stay pending, and step() keeps refusing the
+    state until they are attached. Returns a new state; the input is untouched,
+    and turn_count is unchanged (the turn was counted when it suspended).
+
+    Raises:
+        ValueError: a key is not a pending tool_use id (unknown or already answered).
+    """
+    pending_ids = {block.id for block in pending_tool_uses(state)}
+    invalid = [tool_use_id for tool_use_id in results if tool_use_id not in pending_ids]
+    if invalid:
+        raise ValueError(f"resume: not pending (unknown or already answered): {invalid}")
+    if not results:
+        return LoopState(messages=list(state.messages), turn_count=state.turn_count, todos=state.todos)
+
+    last = _last_assistant_index(state.messages)  # set: results are non-empty and all pending
+    order = {block.id: n for n, block in enumerate(_extract_tool_use_blocks(state.messages[last]))}
+    ids = sorted(results, key=order.__getitem__)
+    trailing = state.messages[last + 1:]
+    answers = [msg for msg in trailing if _answers(msg, order)]
+    answers += [to_tool_result_message(tool_use_id, results[tool_use_id]) for tool_use_id in ids]
+    answers.sort(key=lambda msg: order[msg.content[0].tool_use_id])
+    others = [msg for msg in trailing if not _answers(msg, order)]
+    effects = [results[i].state_effect for i in ids if results[i].state_effect is not None]
+    return LoopState(
+        messages=[*state.messages[: last + 1], *answers, *others],
+        turn_count=state.turn_count,
         todos=apply_state_effects(state.todos, effects),
     )

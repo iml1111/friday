@@ -12,8 +12,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import AsyncGenerator
 
-from pydantic import ValidationError
-
 from friday_agent.messages.types import ContentBlock, Message, create_tool_result_message
 from friday_agent.tools.base import Tool, ToolResult
 
@@ -37,29 +35,48 @@ def _find_tool(tools: list[Tool], name: str) -> Tool | None:
     return None
 
 
+def _validated_input(tool: Tool, block: ContentBlock) -> dict | None:
+    """Return the block input validated against the tool's schema, or None if it does not validate."""
+    if block.input is None:
+        return None
+    try:
+        return tool.input_schema().model_validate(block.input).model_dump()
+    except Exception:
+        return None
+
+
 def _is_concurrency_safe(tool: Tool, block: ContentBlock) -> bool:
     """Return whether a single ContentBlock is concurrency-safe.
 
-    First validates the block input against the tool's schema. If validation
-    fails (including None input), returns False immediately (conservative
-    fallback). On success, delegates to ``tool.is_concurrency_safe``.
+    Validates the block input against the tool's schema first; None or invalid
+    input returns False (conservative fallback). On success, delegates to
+    ``tool.is_concurrency_safe``; a raising predicate also counts as False.
     """
-    raw_input = block.input
-
-    # Attempt schema validation; None input cannot be validated.
+    parsed = _validated_input(tool, block)
+    if parsed is None:
+        return False
     try:
-        schema_model = tool.input_schema()
-        if raw_input is None:
-            # None is unparseable — conservatively treat as non-safe.
-            return False
-        parsed = schema_model.model_validate(raw_input)
-    except (ValidationError, Exception):
-        # Parse failure → conservative fallback.
+        return bool(tool.is_concurrency_safe(parsed))
+    except Exception:
         return False
 
-    # Parsed successfully; delegate to the tool's own predicate.
+
+def is_deferred_call(block: ContentBlock, tools: list[Tool]) -> bool:
+    """Return whether a tool_use block is held back for an external result.
+
+    Evaluated like concurrency safety: an unknown tool, input that fails schema
+    validation, and a raising predicate all count as not deferred — such a call
+    runs inline and the model gets an immediate error, instead of an external
+    executor receiving a malformed call.
+    """
+    tool = _find_tool(tools, block.name or "")
+    if tool is None:
+        return False
+    parsed = _validated_input(tool, block)
+    if parsed is None:
+        return False
     try:
-        return bool(tool.is_concurrency_safe(parsed.model_dump()))
+        return bool(tool.is_deferred(parsed))
     except Exception:
         return False
 

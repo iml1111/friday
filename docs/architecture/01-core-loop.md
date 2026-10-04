@@ -19,9 +19,9 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · pending-call guard | `run_one_turn()`, `pending_tool_uses()` |
+| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · deferred calls · pending-call guard · resume | `run_one_turn()`, `pending_tool_uses()`, `resume()` |
 | `friday_agent/core/engine.py` | External entry point, direct provider injection, memory tool registration · section injection | `FridayAgent.step()`, `FridayAgent.compact()` |
-| `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `LoopState` (`to_dict`/`from_dict`), `PendingToolUseError` |
+| `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `Suspended`, `LoopState` (`to_dict`/`from_dict`), `PendingToolUseError` |
 
 ---
 
@@ -41,11 +41,13 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 2. response → _to_assistant_message()     ← converted to internal Message, then yielded
 
 3. if there are tool_use blocks
-      └─ run_tools(effects_sink=effects) ← parallel tool execution + state_effect collection
+      ├─ deferred calls (Tool.is_deferred → True) are held back
+      └─ run_tools(the rest, effects_sink=effects) ← parallel tool execution + state_effect collection
             └─ yield tool_result message (each result)
 
 4. end of turn: yield 1 sentinel (next_todos = apply_state_effects(state.todos, effects))
       LoopState              ─ loop continues (clean state.messages + next_todos)
+      Suspended              ─ paused on deferred calls: .state (to persist) + .pending (tool_use blocks)
       Terminal               ─ loop terminates; .state = the state to persist
 ```
 
@@ -60,6 +62,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 | `LLMError` (excluding overflow) | `Terminal(reason="model_error", error=..., state=…)` — `state` = the input state; retry with `step(terminal.state)` |
 | `ContextOverflowError` | **raised to the caller** (not a Terminal) — retry after `engine.compact()` |
 | Tool execution complete | `LoopState(..., turn_count+1)` |
+| tool_use includes deferred calls (`Tool.is_deferred`) | the other calls run first, then `Suspended(state, pending)` — `state.turn_count+1` |
 
 ### Final State on `Terminal`
 
@@ -90,14 +93,15 @@ The context injection surface is intentionally simple: static content is passed 
 
 `system_prompt` is **turn-loop only** — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it. What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
 
-### `engine.step(state) -> AsyncGenerator[Message | LoopState | Terminal, None]`
+### `engine.step(state) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]`
 
-An **async generator** that executes one turn. It immediately yields each `Message` produced while the turn progresses (assistant response, each tool_result), then yields exactly **1 sentinel** (`LoopState` or `Terminal`) at the end and finishes.
+An **async generator** that executes one turn. It immediately yields each `Message` produced while the turn progresses (assistant response, each tool_result), then yields exactly **1 sentinel** (`LoopState`, `Suspended` or `Terminal`) at the end and finishes.
 
 ```python
 async for item in engine.step(state):
-    if isinstance(item, (LoopState, Terminal)):
+    if isinstance(item, (LoopState, Suspended, Terminal)):
         outcome = item        # LoopState → next turn (use outcome as state as-is)
+                              # Suspended → persist outcome.state; run outcome.pending elsewhere
                               # Terminal  → loop terminates (outcome.state = state to keep)
     else:
         render(item)          # Message: assistant response or tool_result — consumable on arrival
@@ -121,12 +125,26 @@ See [04-context-compaction](04-context-compaction.md) for details.
 
 `pending_tool_uses(state)` (`core/loop.py`) returns the `tool_use` blocks of the last assistant message that have no `tool_result` after it. It is a pure function of history, so it gives the same answer for a deserialized state. While it is non-empty, `step()` and `compact()` raise `PendingToolUseError(tool_use_ids)` (a `ValueError`, not an `LLMError`) before doing anything — even when a user message was appended after the unanswered calls. Previously such a state reached the API and came back as a 400 `model_error`.
 
+### Deferred Tools — `Suspended` → `resume(state, results)`
+
+A tool whose `is_deferred(input)` returns `True` is not executed by `step()`. The other calls in the response run as usual, then the turn ends with `Suspended(state, pending)`. The caller persists `state` (an ordinary `LoopState`), hands `pending` (the deferred `tool_use` blocks) to whoever produces the results — a person, another service, a job queue — and finishes. When results arrive, possibly in another process:
+
+```python
+state = LoopState.from_dict(load())
+pending_tool_uses(state)                         # the calls still waiting
+state = resume(state, {tool_use_id: ToolResult(data="approved")})
+async for item in engine.step(state): ...        # the next turn, as usual
+```
+
+`resume()` is a pure function: no provider, no tools, no model call. It converts each result with `to_tool_result_message()` (the same conversion `run_tools` uses), inserts it in `tool_use` order ahead of any other trailing message, applies `state_effect`s, and keeps `turn_count`. Partial results are allowed (the rest stay pending); an id that is not pending raises `ValueError`. To close a call that will never finish (cancel, timeout, superseding instruction), pass an `is_error=True` result, append the new user message, and call `step()`.
+
 ### State Types
 
 | Type | Defined At | Role |
 |---|---|---|
 | `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:34` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
 | `Terminal(reason, error=None, state=None)` | `core/state.py:19` | Loop termination sentinel; `state` is always set by the loop |
+| `Suspended(state, pending)` | `core/state.py` | "Paused on deferred tool calls" sentinel; persist `state`, `pending` is recomputable via `pending_tool_uses()` |
 
 ---
 
@@ -163,3 +181,6 @@ By not placing a while-true driver inside the library, the same `FridayAgent.ste
 
 **Why emit `LoopState` as-is for stateless resume?**  
 Emitting a serializable `LoopState` at the turn boundary means that even after a process restart or container move, resuming is just passing the same `LoopState` to `step()`. The types' `to_dict()`/`from_dict()` methods handle the JSON round-trip, and provider · config are excluded from serialization (container-local).
+
+**Why is `resume()` a pure function, not an engine method?**  
+Attaching a result needs neither the provider (credentials) nor the tools, so the process that receives an external result — a webhook, a queue worker — can attach it and persist the state without building an agent. `step()` remains the single entry point that runs a turn.

@@ -141,6 +141,16 @@ class Tool(ABC):
         """Return whether this call can run in parallel with other tools. Defaults to False (conservative)."""
         return False
 
+    def is_deferred(self, input: dict) -> bool:
+        """Return whether this call's result arrives later, outside step(). Defaults to False.
+
+        A deferred call is not executed by step(): the turn ends with
+        Suspended(state, pending) and the caller attaches the result later with
+        resume(). call() still runs for calls this returns False for — including
+        calls whose input fails schema validation, which are never deferred.
+        """
+        return False
+
     @abstractmethod
     async def call(self, args: dict) -> ToolResult:
         """Execute the tool and return a ToolResult."""

@@ -32,10 +32,10 @@ async for item in engine.step(state):   ← AsyncGenerator
    │
    ├─ yield: AssistantMessage          ← immediately on response arrival
    ├─ yield: tool_result Message…      ← each tool result
-   └─ yield: LoopState | Terminal      ← exactly 1 final sentinel
+   └─ yield: LoopState | Suspended | Terminal   ← exactly 1 final sentinel (each carries the state to persist)
         On ContextOverflowError → caller runs engine.compact(state), then retries
 
-If item is LoopState, call step() again with it as-is; if Terminal, stop.
+If item is LoopState, call step() again with it as-is; if Suspended, persist item.state and attach the deferred results later with resume(); if Terminal, stop (item.state is the state to keep).
 ```
 
 Emitting the serializable `LoopState` as-is at each turn boundary supports **stateless distributed resume**.

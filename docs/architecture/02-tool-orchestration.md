@@ -19,7 +19,7 @@ Core contract:
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `to_tool_result_message()`, `Batch` |
+| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `to_tool_result_message()`, `is_deferred_call()`, `Batch` |
 | `friday_agent/tools/base.py` | Tool interface · result type | `Tool`, `ToolResult` |
 | `friday_agent/tools/builtin/example_tool.py` | Demo tool (authoring pattern) | `ExampleTool` |
 
@@ -48,6 +48,8 @@ Core contract:
 - `is_concurrency_safe()` itself raises an exception
 
 **concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:40–64`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:62`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
+
+**Deferred calls**: before partitioning, `run_one_turn` holds back every call for which `is_deferred_call()` is true — the tool's `is_deferred(input)` after the same conservative checks (unknown tool, `None` or invalid input, or a raising predicate → not deferred, so the call runs inline and the model gets an immediate error). Only the remaining calls are partitioned and run; the deferred ones end the turn as `Suspended` ([01-core-loop](01-core-loop.md)).
 
 ---
 
@@ -138,6 +140,7 @@ To be eligible for a parallel batch, `is_concurrency_safe()` just needs to retur
 | `input_schema()` | `type[BaseModel]` | _(abstract)_ | Input schema. **Must implement** |
 | `call(args)` | `ToolResult` | _(abstract)_ | Execution logic. **Must implement** |
 | `is_concurrency_safe(input)` | `bool` | `False` | Whether parallel execution is allowed |
+| `is_deferred(input)` | `bool` | `False` | Whether the call's result arrives later, outside `step()` (the turn ends with `Suspended`) |
 
 ---
 
@@ -195,6 +198,8 @@ ToolResult(
 
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.
+
+**`is_deferred` conservative default** — `False` unless overridden. A deferred tool's `call()` still runs for calls that are not deferred (for example, invalid input), so make it return a clear error result in that case.
 
 **Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names. In addition, when a store is mounted via `memory=` (opt-in), that `MemoryStore`'s `tools()` (default `memory_save`/`memory_read`/`memory_delete`) are also registered, and if a caller tool's name clashes with a built-in or memory tool name, `__init__` rejects it with `ValueError` (uniqueness check across all tool names).
 

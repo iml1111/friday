@@ -14,8 +14,10 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | Conversation history unit |
 | `ContentBlock` (internal flat) | `messages/types.py` | ✅ | Block inside a Message |
-| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` — persisted as-is, or as `Suspended.state` / `Terminal.state` |
 | Everything else | — | ❌ | Runtime-only (provider, config, responses, tool results, etc.) |
+
+> `Suspended` and `Terminal` are not serialized themselves — persist their `.state`. `Suspended.pending` is recomputable from that state via `pending_tool_uses()`.
 
 > **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.7 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
 
@@ -75,6 +77,13 @@ Non-serializable runtime objects such as provider and config are intentionally e
 | `state` | `LoopState \| None` | State to persist — `completed`: input + assistant message (`turn_count+1`); `model_error`: the input state. Always set by the loop |
 
 > **Note**: `run_one_turn()` emits two reasons: `completed` and `model_error`. Context overflow is not a Terminal; it is raised to the caller as `ContextOverflowError`.
+
+#### `Suspended` — the "paused on deferred tool calls" sentinel
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | `LoopState` | State to persist: input + assistant message + results of the calls that ran (`turn_count+1`, todos updated) |
+| `pending` | `list[ContentBlock]` | Deferred `tool_use` blocks in `tool_use` order — recomputable via `pending_tool_uses(state)`, so not serialized |
 
 ---
 
@@ -209,7 +218,7 @@ provider.complete()
    list[dict]  → next provider.complete()
 
 [turn-boundary transport]
-   LoopState(messages=[Message], turn_count)
+   LoopState(messages=[Message], turn_count, todos)   ← itself, Suspended.state or Terminal.state
         └─ json.dumps(loopstate.to_dict())   ← distributed resume unit
 ```
 
