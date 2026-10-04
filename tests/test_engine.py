@@ -9,8 +9,8 @@ Verifies the step() API and the tests/_drive.py driver:
 """
 import pytest
 
-from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE
-from friday_agent.context.compact import COMPACT_PROMPT, SUMMARIZER_SYSTEM_PROMPT
+from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
+from friday_agent.context.compact import COMPACT_PROMPT
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
@@ -158,36 +158,20 @@ async def test_compact_summarizes_to_single_message():
 
 @pytest.mark.asyncio
 async def test_compact_falls_back_to_raw_text_without_summary_tags():
-    """When the summary response has no <summary> tags, compact() wraps the raw text."""
+    """When the summary response has no <summary> tags (after the one no-tools
+    retry), compact() wraps the raw text."""
     raw = AssistantResponse(
         content=[TextBlock(text="plain summary, no tags")],
         stop_reason=StopReason.END_TURN,
         usage=TokenUsage(),
     )
-    engine = FridayAgent(provider=FakeLLMProvider(responses=[raw]), tools=[])
+    engine = FridayAgent(provider=FakeLLMProvider(responses=[raw, raw]), tools=[])
     new_state = await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=2))
     assert len(new_state.messages) == 1
     assert new_state.messages[0].is_compact_summary is True
     text = " ".join(b.text or "" for b in new_state.messages[0].content if b.text)
     assert "plain summary, no tags" in text
     assert new_state.turn_count == 2
-
-
-@pytest.mark.asyncio
-async def test_compact_does_not_inject_general_guidance():
-    """engine.compact() summary call must NOT carry the main-loop general guidance,
-    and must use the dedicated summarizer system (not the caller's role)."""
-    summary = AssistantResponse(
-        content=[TextBlock(text="<summary>S</summary>")],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(),
-    )
-    fake = FakeLLMProvider(responses=[summary])
-    engine = FridayAgent(provider=fake, tools=[], system_prompt="You are a domain assistant.")
-    await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
-    assert GENERAL_AGENT_GUIDANCE not in fake.received_system_prompts[0]
-    assert TODO_GUIDANCE not in fake.received_system_prompts[0]
-    assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -212,11 +196,7 @@ async def test_compact_preserves_todos():
 
 @pytest.mark.asyncio
 async def test_compact_forwards_compact_instructions():
-    """compact_instructions reaches the summary call's final user message.
-
-    system_prompt is deliberately absent from that call (see the test above), so
-    this is the only channel for domain summary requirements.
-    """
+    """compact_instructions reaches the summary call's final user message."""
     summary = AssistantResponse(
         content=[TextBlock(text="<summary>S</summary>")],
         stop_reason=StopReason.END_TURN, usage=TokenUsage(),
@@ -233,8 +213,6 @@ async def test_compact_forwards_compact_instructions():
 
     final_message = fake.received_messages[0][-1]
     assert "Always keep the active sourcing filters verbatim." in final_message["content"]
-    # The domain prompt still stays out of the summarizer system slot.
-    assert fake.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio

@@ -60,7 +60,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 | State has unanswered `tool_use` (pending) | **raises `PendingToolUseError`** before any request — `step()` and `compact()` alike |
 | No tool_use (non-tool stop such as end_turn) | `Terminal(reason="completed", state=…)` — `state` = input + assistant message, `turn_count+1` |
 | `LLMError` (excluding overflow) | `Terminal(reason="model_error", error=..., state=…)` — `state` = the input state; retry with `step(terminal.state)` |
-| `ContextOverflowError` | **raised to the caller** (not a Terminal) — retry after `engine.compact()` |
+| `ContextOverflowError` | **raised to the caller** (not a Terminal) — the caller trims, `engine.compact()`s and retries |
 | Tool execution complete | `LoopState(..., turn_count+1)` |
 | tool_use includes deferred calls (`Tool.is_deferred`) | the other calls run first, then `Suspended(state, pending)` — `state.turn_count+1` |
 
@@ -91,7 +91,7 @@ If `config` is not of type `provider.config_type`, `ValueError` is raised immedi
 
 The context injection surface is intentionally simple: static content is passed by the caller as a single `system_prompt` string (multiple sections are combined on the caller side with `"\n\n".join(...)`). Per-turn content has exactly one engine-level hook, `turn_sections`: each section is awaited with the turn's input `LoopState`, empty output is dropped, and the SDK wraps the rest in `<system-reminder>` (the prefix the Anthropic adapter's breakpoint skip detects) and joins it onto the trailing user message after the todo reminder and the memory index — the `turn_reminders` path of `run_one_turn`. A section that raises propagates.
 
-`system_prompt` is **turn-loop only** by default — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it (`compact(state, reuse_prefix=True)` sends it only to share the cached prefix). What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
+`compact()`'s summarization call carries `system_prompt` only as the shared cached prefix — the compaction prompt after it governs the reply. What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]`
 
@@ -109,18 +109,19 @@ async for item in engine.step(state):
 
 `ContextOverflowError` is not consumed; it propagates to the caller as-is.
 
-### `await engine.compact(state, *, reuse_prefix=False) -> LoopState`
+### `await engine.compact(state) -> LoopState`
 
 Reduces all of `state.messages` to a single summary. `turn_count` is preserved.
 
-With `reuse_prefix=True`, the summary call reuses `step()`'s exact system prompt and tools so the provider can serve the history from its prompt cache (see [04-context-compaction](04-context-compaction.md)).
+The summary call sends `step()`'s exact system prompt, tools and config, so the provider serves the history from its prompt cache (see [04-context-compaction](04-context-compaction.md)). It is therefore `step()`'s request plus the compaction prompt: compact proactively, or trim an overflowed state first.
 
 `ContextOverflowError` recovery flow:
 
 ```
 step(state) → ContextOverflowError raised
-    └─ compact(state) → reduced LoopState
-          └─ retry step(reduced state)
+    └─ caller trims state (its own policy, e.g. drop the oldest turns)
+          └─ compact(trimmed) → reduced LoopState
+                └─ retry step(reduced state)
 ```
 
 See [04-context-compaction](04-context-compaction.md) for details.
@@ -167,10 +168,10 @@ async for item in engine.step(state): ...        # the next turn, as usual
 
 ## ⑥ Maintenance Notes
 
-- **Context window management is the caller's responsibility.** `step()` sends `state.messages` to the API as-is. When the token budget is exceeded it throws `ContextOverflowError`, so the caller must reduce via `engine.compact(state)` and retry.
-- **General behavior block auto-injection.** `run_one_turn()` **always** injects `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · reversibility of actions · conciseness, etc.) **before** the caller's `system_prompt` when sending (`assemble_system_prompt()`). Order is general→specific — the domain prompt comes last so its rules override the general guidance via recency. There is no opt-out flag. By default the compaction summary call (`engine.compact()`) does not go through this path, so the general block does not reach the summary; `compact(state, reuse_prefix=True)` sends the identical system prompt on purpose, to share the cached prefix.
-- **TodoWrite tool · guidance auto-injection (built-in).** `FridayAgent` always merges the tools from `builtin_tools()` (`tools/builtin/__init__.py`) into the caller's tools, and `assemble_system_prompt()` always appends `TODO_GUIDANCE` (no opt-out). If the caller injects a tool with the same name as a built-in, `FridayAgent.__init__` rejects it with `ValueError`. By default the compaction summary does not go through this prompt path, so `TODO_GUIDANCE` does not reach it (`reuse_prefix=True` sends it on purpose, with the rest of the prefix).
-- **Memory prompt injection (opt-in, static/dynamic split).** Only when a `memory=` store is mounted: `engine.step()` places the static instructions `MEMORY_INSTRUCTIONS` before the base system prompt (general→specific, byte-stable within a session), and renders the live index every turn via `build_memory_reminder(self._memory)`, carrying it as a turn-local reminder (`turn_reminders` path) on `messages[-1]` only. With `memory=None` (default), this entire path is skipped. `compact()` never renders the live index, so it does not leak into the summary (with `reuse_prefix=True` only the static `MEMORY_INSTRUCTIONS` rides along in the shared prefix). `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. From the prompt caching (always-on) perspective: even when `memory_save`/`delete` changes the index, the system prefix · conversation history caches survive — only the reminder block outside the breakpoints changes (putting the index in system would invalidate the whole conversation cache on a single save). See [08-memory](08-memory.md) for details.
+- **Context window management is the caller's responsibility.** `step()` sends `state.messages` to the API as-is. When the token budget is exceeded it throws `ContextOverflowError`, so the caller must reduce the state — trim, then `engine.compact(state)` (the summary call re-sends `step()`'s prefix) — and retry.
+- **General behavior block auto-injection.** `run_one_turn()` **always** injects `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · reversibility of actions · conciseness, etc.) **before** the caller's `system_prompt` when sending (`assemble_system_prompt()`). Order is general→specific — the domain prompt comes last so its rules override the general guidance via recency. There is no opt-out flag. The compaction summary call (`engine.compact()`) sends the identical system prompt on purpose, to share the cached prefix.
+- **TodoWrite tool · guidance auto-injection (built-in).** `FridayAgent` always merges the tools from `builtin_tools()` (`tools/builtin/__init__.py`) into the caller's tools, and `assemble_system_prompt()` always appends `TODO_GUIDANCE` (no opt-out). If the caller injects a tool with the same name as a built-in, `FridayAgent.__init__` rejects it with `ValueError`. The compaction summary call sends it too, with the rest of the shared prefix.
+- **Memory prompt injection (opt-in, static/dynamic split).** Only when a `memory=` store is mounted: `engine.step()` places the static instructions `MEMORY_INSTRUCTIONS` before the base system prompt (general→specific, byte-stable within a session), and renders the live index every turn via `build_memory_reminder(self._memory)`, carrying it as a turn-local reminder (`turn_reminders` path) on `messages[-1]` only. With `memory=None` (default), this entire path is skipped. `compact()` never renders the live index, so it does not leak into the summary (only the static `MEMORY_INSTRUCTIONS` rides along in the shared prefix). `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. From the prompt caching (always-on) perspective: even when `memory_save`/`delete` changes the index, the system prefix · conversation history caches survive — only the reminder block outside the breakpoints changes (putting the index in system would invalidate the whole conversation cache on a single save). See [08-memory](08-memory.md) for details.
 - **`tool_use↔tool_result` pair preservation.** `run_tools()` emits exactly one `tool_result` per executed `tool_use` (unknown tools and exceptions become error results), and the only error path (`LLMError` from the provider call) fires before an assistant message exists — so no unpaired `tool_use` is ever persisted. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.

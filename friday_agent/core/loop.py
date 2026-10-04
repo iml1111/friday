@@ -201,7 +201,8 @@ async def run_one_turn(
         PendingToolUseError: when state still has unanswered tool_use blocks
             (raised before the provider is called).
         ContextOverflowError: when the provider rejects the messages as too long.
-            The caller should compact state via engine.compact() and retry.
+            The caller shrinks the state (trimming first, since engine.compact()
+            re-sends the same prefix) and retries.
     """
     # Never send an unpaired tool_use: the API would reject it, and the 400
     # would surface only as an opaque model_error.

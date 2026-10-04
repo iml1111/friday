@@ -72,7 +72,7 @@ class RateLimitError(LLMError):
 
 
 class ContextOverflowError(LLMError):
-    """Context window exceeded — propagated to the caller to compact (engine.compact) and retry."""
+    """Context window exceeded — propagated to the caller to shrink the context and retry."""
     pass
 
 

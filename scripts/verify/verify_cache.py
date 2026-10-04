@@ -11,10 +11,9 @@ AnthropicProvider._apply_cache_control:
   * Both turns carry a per-turn section (turn_sections) that changes every
     call — it rides messages[-1] as a <system-reminder>, so turn 2 must still
     read the cache.
-  * Compaction with reuse_prefix=True (the call after turn 2):
-    cache_read_input_tokens > 0 — the summary call reads the history the agent
-    turns cached instead of writing it again. A default compaction runs once
-    more for contrast (printed, not asserted).
+  * Compaction (the call after turn 2): cache_read_input_tokens > 0 — the
+    summary call shares step()'s prefix, so it reads the history the agent
+    turns cached instead of writing it again.
 
 A per-run nonce embedded in the system prompt makes turn 1 cold even on rapid
 re-runs (defeats the 5-minute server TTL left by a previous run), while both
@@ -23,7 +22,7 @@ turns share the identical prompt so turn 2 hits.
 Usage:
     LLM_MODEL=claude-haiku-4-5 python scripts/verify/verify_cache.py
 
-Cost guardrail: max_tokens=256 for turns (summary calls use the compaction default); four or five completion calls over a ~12K-token prefix.
+Cost guardrail: max_tokens=256 for turns (the summary call raises it to the summary budget); three or four completion calls over a ~12K-token prefix.
 Anthropic-only — it verifies the explicit cache_control breakpoints. For gpt-*
 models caching is automatic (no _apply_cache_control), so the script declines.
 """
@@ -178,12 +177,10 @@ async def main() -> int:
     outcome2, collected2 = await _run_turn(engine, state2)
     _diag_turn(2, outcome2, collected2)
 
-    # Compaction over the same history: first with the agent's own prefix (must
-    # read the cache the turns wrote), then the default path for contrast.
+    # Compaction over the same history: the summary call shares step()'s prefix,
+    # so it must read the cache the turns wrote.
     state3 = outcome2.state if isinstance(outcome2, Terminal) else outcome2
-    reuse_at = len(recorder.calls)
-    await engine.compact(state3, reuse_prefix=True)
-    default_at = len(recorder.calls)
+    compact_at = len(recorder.calls)
     await engine.compact(state3)
 
     thinking_seen = any(
@@ -212,8 +209,8 @@ async def main() -> int:
         "turn sections rode both turns (per-turn note 1 and 2 sent)":
             "Per-turn note 1" in json.dumps(recorder.messages[0])
             and "Per-turn note 2" in json.dumps(recorder.messages[1]),
-        "compaction with reuse_prefix read cache (cache_read > 0)":
-            recorder.calls[reuse_at].cache_read_input_tokens > 0,
+        "compaction read cache (cache_read > 0)":
+            recorder.calls[compact_at].cache_read_input_tokens > 0,
     }
 
     print("\n--- Checklist ---")
@@ -230,8 +227,7 @@ async def main() -> int:
     print(f"\n  turn-2 cached-read tokens: {saved:,} "
           f"(billed ~0.1x vs 1x -> ~{saved * 0.9:,.0f} tokens' worth saved this turn)")
 
-    print(f"  compaction reuse_prefix : {_fmt(recorder.calls[reuse_at])}")
-    print(f"  compaction default      : {_fmt(recorder.calls[default_at])}  (contrast — not asserted)")
+    print(f"  compaction: {_fmt(recorder.calls[compact_at])}")
 
     print("\n" + ("=" * 28 + " PASS " + "=" * 28 if all_pass
                   else "=" * 28 + " FAIL " + "=" * 28))

@@ -9,12 +9,23 @@ from friday_agent.api.provider import (
 )
 from friday_agent.context.compact import (
     COMPACT_PROMPT,
-    SUMMARIZER_SYSTEM_PROMPT,
     build_compact_prompt,
     compact_conversation,
     create_compact_summary_message,
 )
-from tests.fakes import FakeLLMProvider
+from tests.fakes import FakeConfig, FakeLLMProvider
+
+
+def _compact(provider: FakeLLMProvider, messages: list[dict] | None = None, **kwargs):
+    """compact_conversation with a fixed system prompt, no tools and a default config."""
+    return compact_conversation(
+        provider=provider,
+        messages=messages or [{"role": "user", "content": "x"}],
+        system_prompt="SYS",
+        tools=[],
+        config=FakeConfig(),
+        **kwargs,
+    )
 
 
 def _summary_response(text: str = "<summary>s</summary>") -> AssistantResponse:
@@ -41,7 +52,7 @@ async def test_compact_conversation_extracts_summary_tag():
     provider = FakeLLMProvider(responses=[response])
 
     messages = [{"role": "user", "content": "hello"}]
-    result = await compact_conversation(provider=provider, messages=messages)
+    result = await _compact(provider, messages)
 
     assert result == summary_text
     # provider.complete() must have been called exactly once
@@ -49,8 +60,8 @@ async def test_compact_conversation_extracts_summary_tag():
 
 
 @pytest.mark.asyncio
-async def test_compact_conversation_uses_no_tools():
-    """compact_conversation must call complete() with an empty tools list."""
+async def test_compact_conversation_sends_the_given_tools():
+    """compact_conversation sends exactly the tools it is given (here none)."""
     response = AssistantResponse(
         content=[TextBlock(type="text", text="<summary>short</summary>")],
         stop_reason=StopReason.END_TURN,
@@ -58,9 +69,10 @@ async def test_compact_conversation_uses_no_tools():
     )
     provider = FakeLLMProvider(responses=[response])
 
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    await _compact(provider)
 
-    assert provider.received_tools[0] == [], "compact must send empty tools list"
+    assert provider.received_tools[0] == []
+    assert provider.received_system_prompts[0] == "SYS"
 
 
 @pytest.mark.asyncio
@@ -74,7 +86,7 @@ async def test_compact_conversation_no_summary_tag_returns_raw():
     )
     provider = FakeLLMProvider(responses=[response])
 
-    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    result = await _compact(provider)
     assert result == raw_text
 
 
@@ -93,9 +105,9 @@ def test_compact_prompt_has_enriched_structure():
 
 
 def test_no_tools_guard_appears_exactly_once():
-    """compact_conversation sends tools=[] and both adapters drop the field entirely,
-    so the model cannot emit tool_use at all. One mention is belt-and-suspenders for
-    third-party providers that ignore the argument; repeating it is dead weight."""
+    """One no-tools request is enough: a reply that calls a tool anyway is retried
+    with tools=[], where both adapters drop the field and tool_use is impossible.
+    Repeating the guard is dead weight."""
     assert COMPACT_PROMPT.count("Do NOT call any tools") == 1
     # The trailing reminder guards the OUTPUT FORMAT, not tool use.
     assert COMPACT_PROMPT.rstrip().endswith(
@@ -111,19 +123,6 @@ def test_create_compact_summary_message_has_continuation_framing():
     assert "THE-SUMMARY-BODY" in text
     assert "continued from a previous conversation" in text
     assert "without asking the user any further questions" in text
-
-
-@pytest.mark.asyncio
-async def test_compact_conversation_uses_dedicated_summarizer_system():
-    """With no system_prompt override, the summary call uses SUMMARIZER_SYSTEM_PROMPT."""
-    response = AssistantResponse(
-        content=[TextBlock(type="text", text="<summary>s</summary>")],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(input_tokens=1, output_tokens=1),
-    )
-    provider = FakeLLMProvider(responses=[response])
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
-    assert provider.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +171,7 @@ async def test_compact_conversation_sends_extra_instructions():
     """extra_instructions reaches the final user message of the summary call."""
     provider = FakeLLMProvider(responses=[_summary_response()])
 
-    await compact_conversation(
-        provider=provider,
-        messages=[{"role": "user", "content": "x"}],
-        extra_instructions="Preserve every sourcing filter verbatim.",
-    )
+    await _compact(provider, extra_instructions="Preserve every sourcing filter verbatim.")
 
     final_message = provider.received_messages[0][-1]
     assert final_message["role"] == "user"
@@ -188,7 +183,7 @@ async def test_compact_conversation_defaults_to_base_prompt():
     """Omitting extra_instructions sends the untouched base prompt."""
     provider = FakeLLMProvider(responses=[_summary_response()])
 
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    await _compact(provider)
 
     assert provider.received_messages[0][-1]["content"] == COMPACT_PROMPT
 
@@ -203,7 +198,7 @@ async def test_compact_conversation_ignores_stray_closing_tag_before_summary():
     raw = "<analysis>notes</summary>\n<summary>REAL BODY</summary>"
     provider = FakeLLMProvider(responses=[_summary_response(raw)])
 
-    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    result = await _compact(provider)
 
     assert result == "REAL BODY"
 
@@ -213,7 +208,7 @@ async def test_compact_conversation_empty_summary_falls_back_to_full_text():
     raw = "<analysis>notes</analysis><summary>  </summary>"
     provider = FakeLLMProvider(responses=[_summary_response(raw)])
 
-    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    result = await _compact(provider)
 
     assert result == raw
 
@@ -223,6 +218,6 @@ async def test_compact_conversation_unclosed_summary_falls_back_to_full_text():
     raw = "<analysis>notes</analysis><summary>cut off mid-sentence"
     provider = FakeLLMProvider(responses=[_summary_response(raw)])
 
-    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+    result = await _compact(provider)
 
     assert result == raw

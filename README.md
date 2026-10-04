@@ -10,7 +10,7 @@ The core is a turn loop that the caller drives by repeatedly calling `FridayAgen
 User message → LLM call → stop_reason branch
                               ├─ end_turn  → stop (Terminal)
                               └─ tool_use  → run tools → append tool_result to conversation → loop again
-                                            (ContextOverflowError → caller runs engine.compact(state) → retry)
+                                            (ContextOverflowError → caller trims, runs engine.compact(state) → retry)
 ```
 
 > `docs/architecture/` is the implementation-centric source of truth. For the architecture big picture,
@@ -104,7 +104,10 @@ while True:
             else:
                 print(item)                     # handle assistant responses / tool_result in real time
     except ContextOverflowError:
-        state = await engine.compact(state)     # summarize the conversation, then retry
+        # compact() re-sends step()'s exact prefix, so trim first (your policy —
+        # e.g. drop the oldest turns, keeping tool_use/tool_result pairs; one
+        # version: _trim_and_compact in scripts/run_agent.py).
+        state = await engine.compact(drop_oldest_turns(state))
         continue
     if isinstance(outcome, Terminal):
         break                                   # stop
@@ -115,7 +118,7 @@ If the last item received is a `Terminal`, stop the loop. `terminal.reason` is o
 
 ### Injecting Domain Requirements into Compaction (opt-in)
 
-By default, the summarization call in `engine.compact()` runs with a dedicated summarizer system prompt, so `system_prompt` does not reach it. "What must the summary always retain in this domain" is passed via the constructor.
+The summarization call in `engine.compact()` carries `system_prompt` only as the shared cache prefix; the compaction prompt after it governs the reply. "What must the summary always retain in this domain" is passed via the constructor.
 
 ```python
 engine = FridayAgent(
@@ -130,7 +133,7 @@ engine = FridayAgent(
 
 The injected block is placed **after** the default prompt's 9-section spec and **before** the output-format instructions, with a header stating it "takes precedence over the generic sections" — covering both adding sections and redefining existing ones. If omitted (the default), the prompt is byte-for-byte unchanged. For details, see [04-context-compaction](docs/architecture/04-context-compaction.md).
 
-Pass `reuse_prefix=True` (`await engine.compact(state, reuse_prefix=True)`) to send the summary call with the agent's own system prompt and tools — the provider can then serve the conversation from its prompt cache instead of writing it again. Use it for proactive compaction; leave it off when recovering from `ContextOverflowError`, since the extra prefix tokens can overflow the summary call itself.
+The summary call always sends the agent's own system prompt, tools and config, so the provider serves the conversation from its prompt cache instead of writing it again. The flip side: it is `step()`'s request plus the compaction prompt, so a state that overflowed `step()` overflows it too. Compact proactively, before the window fills; after a `ContextOverflowError`, trim the state yourself before calling `compact()`.
 
 ### Per-Turn Context (opt-in)
 
@@ -281,7 +284,7 @@ class MyProvider(LLMProvider[MyConfig]):
             stop_reason=StopReason.END_TURN,         # TOOL_USE / MAX_TOKENS / END_TURN
             usage=TokenUsage(input_tokens=resp.in_, output_tokens=resp.out),
         )
-        # on context overflow, raise ContextOverflowError → caller runs engine.compact(state), then retries
+        # on context overflow, raise ContextOverflowError → caller trims + runs engine.compact(state), then retries
 ```
 
 Implementation contract:
