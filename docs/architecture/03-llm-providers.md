@@ -106,13 +106,13 @@ The core of the vendor boundary — describes where the two adapters behave diff
 
 | Item | Anthropic (`api/anthropic_provider.py`) | OpenAI (`api/openai_provider.py`) |
 |---|---|---|
-| **Tool input parsing** | SDK pre-parses `tool_use.input` into a dict. Do not re-parse (`_normalize_block:234`) | `tool_calls[].function.arguments` is a JSON string → `json.loads` (`_parse_arguments:279`) |
+| **Tool input parsing** | SDK pre-parses `tool_use.input` into a dict. Do not re-parse (`_normalize_block:234`) | `tool_calls[].function.arguments` is a JSON string → `json.loads` (`_parse_arguments:308`) |
 | **Message format** | Content blocks passed as-is | `tool_use`→`tool_calls`, `tool_result`→`{"role":"tool"}` (emitted **before** the same turn's text — reminders ride the tool_result turn, and tool messages must directly follow `tool_calls`), system→leading message, thinking dropped (`_to_openai_messages`) |
 | **tool_result images** | `[text, image]` block array sent as-is | Flattened by `_flatten_tool_result_content`: text blocks joined, each image replaced by `[image omitted: not supported by the OpenAI adapter]` (Chat Completions tool messages are text-only) |
-| **Empty tools** | Field omitted entirely (`_build_params:144`) | Same — field omitted entirely (`_build_params:142`) |
+| **Empty tools** | Field omitted entirely (`_build_params:144`) | Same — field omitted entirely (`_build_params:168`) |
 | **thinking** | `temperature` not sent when `thinking_enabled=True` (`_build_params:148`) | thinking not supported |
-| **Overflow detection** | 400/413 + message signal check (`_is_context_overflow:318`) | 400/413 + `body.error.code=="context_length_exceeded"` or message check (`_is_context_overflow:353`) |
-| **Unmapped stop_reason** | Falls back to `END_TURN` (`_map_stop_reason:260`) | Falls back to `END_TURN` (`_map_stop_reason:297`) |
+| **Overflow detection** | 400/413 + message signal check (`_is_context_overflow:318`) | 400/413 + `body.error.code=="context_length_exceeded"` or message check (`_is_context_overflow:382`) |
+| **Unmapped stop_reason** | Falls back to `END_TURN` (`_map_stop_reason:260`) | Falls back to `END_TURN` (`_map_stop_reason:326`) |
 | **Prompt caching** | always-on. `_apply_cache_control` places `cache_control:{ephemeral}` on the last system block (=tools+system) + the last **persistent** block of the last/second-to-last message (skipping trailing `<system-reminder>` reminders) | Automatic (no request-side opt-in). `_extract_usage` reads `prompt_tokens_details.cached_tokens` |
 
 ---

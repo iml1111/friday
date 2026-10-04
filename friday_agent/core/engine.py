@@ -55,9 +55,11 @@ class FridayAgent:
                 system section, no per-turn index reminder. Pass a store
                 (e.g. FileMemoryStore()) to opt in.
         compact_instructions: Domain requirements folded into the compaction
-                prompt used by compact(). system_prompt does not reach that call
-                (summarization runs under its own summarizer system prompt), so
-                this is the only way to steer what a summary must preserve.
+                prompt used by compact(). By default system_prompt does not
+                reach that call (summarization runs under its own summarizer
+                system prompt; compact(state, reuse_prefix=True) sends it only to
+                share the cached prefix), so this is the channel for what a
+                summary must preserve.
                 Empty (the default) leaves the base prompt untouched.
         turn_sections: Async callables rendered on every step() from the turn's
                 input state. Each non-empty output is wrapped in a
