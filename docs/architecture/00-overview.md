@@ -52,8 +52,7 @@ Per-turn state the model should see (current screen, progress) goes through `tur
 |---|---|---|
 | `core/` | `loop.py`·`engine.py`·`state.py` | [01-core-loop](01-core-loop.md) |
 | `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py`·`builtin/todo_write.py` | [02-tool-orchestration](02-tool-orchestration.md) |
-| `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) |
-| `context/` | `compact.py` | [04-context-compaction](04-context-compaction.md) |
+| `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) · compaction ([04-context-compaction](04-context-compaction.md)) is `FridayAgent.compact()` + the texts in `prompts.py` |
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (cross-cutting) | par-critical invariants | [06-invariants](06-invariants.md) |
 | (cross-cutting) | catalog of all data models | [07-data-models](07-data-models.md) |

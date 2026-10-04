@@ -12,7 +12,7 @@ The `api/` package consolidates three responsibilities into a single swap bounda
 2. **Error hierarchy** — normalizes vendor exceptions into 5 classes so the loop does not depend on vendor SDKs.
 3. **Vendor adapters** — Anthropic / OpenAI each implement the same interface.
 
-`core/loop.py` and `context/compact.py` call only `LLMProvider.complete()`. Swapping the adapter requires no change to the loop code.
+`core/loop.py` and `FridayAgent.compact()` call only `LLMProvider.complete()`. Swapping the adapter requires no change to the loop code.
 
 ---
 
@@ -131,8 +131,7 @@ The core of the vendor boundary — describes where the two adapters behave diff
 
 ```
 core/loop.py         → provider.complete()  call
-context/compact.py   → provider.complete()  call (when generating the summary)
-core/engine.py       → provider.config_type validation
+core/engine.py       → provider.complete()  call (compact(): the summary) · provider.config_type validation
 ```
 
 Dependency direction within the `api/` package: `anthropic_provider` / `openai_provider` → `provider` ← `configs`.

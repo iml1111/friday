@@ -116,7 +116,7 @@ Converts the internal `Message` list into the `{"role": str, "content": list[dic
 
 ## ④ Public API
 
-The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and compactor (`context/compact.py`) directly import and use the first 3 symbols; the 2 turn-local reminder protocol symbols are shared by the reminder producers (`core/loop.py`·`memory/store.py`) and the detector (`api/anthropic_provider.py`).
+The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and engine (`core/engine.py`, for the compaction summary) directly import and use the first 3 symbols; the 2 turn-local reminder protocol symbols are shared by the reminder producers (`core/loop.py`·`memory/store.py`) and the detector (`api/anthropic_provider.py`).
 
 | Symbol | Location | Role |
 |---|---|---|
@@ -136,11 +136,10 @@ Conversely, the subsystems below depend on this package:
 | Dependency Module | Symbols Used |
 |---|---|
 | `friday_agent/core/loop.py` | `normalize_for_api()` |
-| `friday_agent/core/engine.py` | `normalize_for_api()` |
+| `friday_agent/core/engine.py` | `normalize_for_api()`, `create_user_message()` (the compaction summary message) |
 | `friday_agent/tools/orchestrator.py` | `create_tool_result_message()` |
-| `friday_agent/context/compact.py` | `create_user_message()` (inside `create_compact_summary_message()`) |
 
-> `create_user_message()` is used only in `context/compact.py`.
+> Inside the library, `create_user_message()` is used only by `engine.compact()`.
 
 ---
 

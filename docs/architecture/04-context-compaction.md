@@ -13,7 +13,7 @@ The summary call shares `step()`'s exact prefix (system prompt, tools, config) s
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/context/compact.py` | Compaction prompt · summary message construction | `build_compact_prompt()`, `COMPACT_PROMPT`, `create_compact_summary_message()` |
+| `friday_agent/api/prompts.py` | Compaction prompt text · summary message text | `COMPACT_PROMPT` (`{domain_requirements}` slot), `COMPACT_SUMMARY_MESSAGE` (`{summary}` slot) |
 | `friday_agent/core/engine.py` | compact entry point and the summary call (it owns the prefix the call shares with `step()`) | `FridayAgent.compact()`, `FridayAgent._extract_summary()` |
 
 ---
@@ -24,21 +24,21 @@ The summary call shares `step()`'s exact prefix (system prompt, tools, config) s
 caller decides to compact (proactively, or after trimming an overflowed state)
    └─ engine.compact(state)
          ├─ normalize_for_api(state.messages)          # convert to a list of API-format dicts
-         ├─ append build_compact_prompt(compact_instructions) as the last user message
+         ├─ append COMPACT_PROMPT (compact_instructions in its slot) as the last user message
          ├─ provider.complete(system + tools = step()'s own, config = copy of the agent's, max_tokens ≥ 20000)
          │     # a tool_use or no <summary> → retry once with tools=[]
          ├─ extract the <summary> body (_extract_summary)
          │     · </summary> is searched only after <summary>
          │     · <analysis> block is discarded
          │     · a missing pair or an empty body falls back to the full text
-         ├─ create_compact_summary_message(summary)     # user message with is_compact_summary=True
+         ├─ COMPACT_SUMMARY_MESSAGE around the summary   # user message with is_compact_summary=True
          └─ return LoopState(messages=[summary], turn_count preserved)
    └─ caller retries step()
 ```
 
 ### Items Preserved by COMPACT_PROMPT
 
-`_COMPACT_PROMPT_HEAD` in `context/compact.py:30` instructs the LLM to preserve the following 9 items in the summary:
+`COMPACT_PROMPT` in `api/prompts.py:94` instructs the LLM to preserve the following 9 items in the summary:
 
 1. Primary Request and Intent
 2. Key Technical Concepts
@@ -56,7 +56,7 @@ The output format is `<analysis>scratchpad</analysis><summary>summary body</summ
 
 ### Domain Instruction Injection Slot (opt-in)
 
-The summary call does carry the caller's `system_prompt`, but only as the shared cache prefix — the compaction prompt that follows it governs the reply. The **channel** for specifying "what must this domain's summary keep" is `FridayAgent(..., compact_instructions="...")`. The value is passed through `engine.compact()` → `build_compact_prompt()`.
+The summary call does carry the caller's `system_prompt`, but only as the shared cache prefix — the compaction prompt that follows it governs the reply. The **channel** for specifying "what must this domain's summary keep" is `FridayAgent(..., compact_instructions="...")`. `engine.compact()` places it in `COMPACT_PROMPT`'s `{domain_requirements}` slot under a precedence header.
 
 ```
 <head: CRITICAL guard (no-tools once · no-questions) + analysis instructions + 9-section spec>
@@ -70,7 +70,7 @@ Domain-specific requirements for this summary
 
 - **Position is the contract** — the slot sits after section 9 and before `Output format`. The trailing `REMINDER` carries the `<analysis>`/`<summary>` **output format contract**, and recency is what drives compliance with it. An untagged response falls back to the full text, mixing the scratchpad into the summary, so the injected block must not push this position out.
 - **precedence header** — thanks to the "take precedence over the generic sections above" wording, both adding sections (write a section 10) and redefining existing ones (handle section 3 like this) are covered by a single slot. Hence there is **no full-replacement option** for the prompt — allowing replacement would leave the vendored copy in a forked state that cannot receive upstream prompt improvements.
-- **Default is no-op** — with `compact_instructions=""` (default), the output of `build_compact_prompt()` is **byte-for-byte identical** to `COMPACT_PROMPT`. A whitespace-only string is also a no-op.
+- **Default is no-op** — with `compact_instructions=""` (default), the slot is filled with `""` and the prompt is the base prompt, **byte for byte**. A whitespace-only string is also a no-op.
 - Being an engine-local setting, the `LoopState` serialization surface is unchanged — on distributed resume it is re-injected container-locally together with `provider`·`system_prompt`.
 
 ### Shared Prefix
@@ -98,15 +98,6 @@ async def compact(self, state: LoopState) -> LoopState:
 - Raises `PendingToolUseError` when the state still has unanswered `tool_use` blocks (a suspended turn) — attach them with `resume()` first; the summary call would otherwise send the unpaired `tool_use`.
 - Propagates `ContextOverflowError` from the summary call (a state that overflowed `step()` overflows here too — trim it first).
 
-### `build_compact_prompt()` — prompt rendering
-
-```python
-def build_compact_prompt(extra_instructions: str = "") -> str:
-```
-
-- If the argument is empty (or whitespace-only), returns a string identical to `COMPACT_PROMPT`.
-- The `COMPACT_PROMPT` constant itself is defined as the result of `build_compact_prompt()`, so the two cannot diverge.
-
 ---
 
 ## ⑤ Dependencies
@@ -114,7 +105,8 @@ def build_compact_prompt(extra_instructions: str = "") -> str:
 | Dependency Module | Symbols Used | Purpose |
 |---|---|---|
 | `friday_agent/api/provider.py` | `LLMProvider.complete()`, `LLMConfig` | Summary LLM call |
-| `friday_agent/messages/types.py` | `create_user_message()` | Summary message creation (`context/compact.py`) |
+| `friday_agent/messages/types.py` | `create_user_message()` | Summary message creation |
+| `friday_agent/api/prompts.py` | `COMPACT_PROMPT`, `COMPACT_SUMMARY_MESSAGE`, `assemble_system_prompt()` | Prompt texts · the shared system prompt |
 | `friday_agent/messages/normalize.py` | `normalize_for_api()` | Engine-side conversion before the call |
 
 See [01-core-loop](01-core-loop.md) for the full context of the call flow.
@@ -124,11 +116,11 @@ See [01-core-loop](01-core-loop.md) for the full context of the call flow.
 ## ⑥ Maintenance Notes
 
 - **No tool calls reach state**: the first summary call carries the agent's tools; a `tool_use` reply is discarded and retried with `tools=[]`. Only the summary text is used, so `tool_use`↔`tool_result` pairing cannot break.
-- **`is_compact_summary=True` flag**: the user message produced by `create_compact_summary_message()` is marked `is_compact_summary=True` (`context/compact.py:115`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
-- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary], turn_count=state.turn_count, todos=state.todos)` (`core/engine.py:231`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
+- **`is_compact_summary=True` flag**: the summary user message built in `engine.compact()` is marked `is_compact_summary=True` (`core/engine.py:236`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
+- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary], turn_count=state.turn_count, todos=state.todos)` (`core/engine.py:238`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
 - **`<summary>` extraction and fallback**: `FridayAgent._extract_summary()` (`core/engine.py`) finds `<summary>` and searches for `</summary>` only after it — a summarizer that mistakenly closes its `<analysis>` with `</summary>` would otherwise produce an empty summary and wipe the history. A missing pair or an empty body returns `None`, and the full response text is used instead. This is defensive code so the loop never halts on a format slip; lower format compliance degrades summary quality, so take care when modifying the prompt.
 - **Shared prefix**: `engine.compact()` builds the summary call's system prompt and tools with the same helpers `step()` uses (`_effective_system_prompt()`, `_tool_schemas()`) — a change to one path that skips the other silently loses the cache read.
-- **Continuation framing**: `create_compact_summary_message()` wraps the summary in a "continuing the previous conversation" preamble + a "resume directly, no further questions" directive. This is for smooth resumption after compaction; changing the body affects resume behavior.
+- **Continuation framing**: `COMPACT_SUMMARY_MESSAGE` wraps the summary in a "continuing the previous conversation" preamble + a "resume directly, no further questions" directive. This is for smooth resumption after compaction; changing the body affects resume behavior.
 
 ---
 

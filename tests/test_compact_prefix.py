@@ -2,7 +2,7 @@
 import pytest
 
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
-from friday_agent.context.compact import COMPACT_PROMPT
+from friday_agent.api.prompts import COMPACT_PROMPT
 from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState
 from friday_agent.memory.store import MemoryEntry, MemoryType
@@ -39,7 +39,7 @@ async def test_compact_matches_step_system_and_tools():
 
     assert fake.received_system_prompts[1] == fake.received_system_prompts[0]
     assert fake.received_tools[1] == fake.received_tools[0]
-    assert fake.received_messages[1][-1]["content"] == COMPACT_PROMPT
+    assert fake.received_messages[1][-1]["content"] == COMPACT_PROMPT.format(domain_requirements="")
     assert fake.call_count == 2
 
 

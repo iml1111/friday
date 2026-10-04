@@ -1,8 +1,9 @@
-"""System prompt assembly helpers.
+"""Prompt texts and system prompt assembly.
 
 ``assemble_system_prompt`` injects the general agent guidance and wraps the
 result in a ``SystemPrompt`` that converts to a plain string for
-``LLMProvider.complete``.
+``LLMProvider.complete``. The compaction prompt and summary message used by
+``FridayAgent.compact`` live here too.
 """
 from __future__ import annotations
 
@@ -71,3 +72,59 @@ def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
     """
     blocks = [b for b in (GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE, system_prompt) if b]
     return SystemPrompt(text="\n\n".join(blocks))
+
+
+# ---------------------------------------------------------------------------
+# Compaction (FridayAgent.compact)
+# ---------------------------------------------------------------------------
+
+# Final user message of the summary call. Layout, top to bottom:
+#   - CRITICAL guard: the ONE no-tools line. The summary call carries the agent's
+#     tools (they are part of step()'s cached prefix), so this line is the
+#     request; a tool_use reply is retried once with tools=[], where both
+#     adapters omit the field and a tool_use is impossible.
+#   - Analysis instructions + the nine summary sections.
+#   - {domain_requirements}: the caller's compact_instructions. FridayAgent.compact
+#     fills it with "" (the prompt is then the base prompt, byte for byte) or with
+#     a precedence header, the instructions and a blank line — so domain rules can
+#     both add sections and redefine generic ones without forking the prompt.
+#   - Output format + REMINDER: must stay last. It carries the <analysis>/<summary>
+#     output contract, and recency is what makes the model honor it; a reply
+#     without the tags falls back to the raw text, leaking the scratchpad.
+COMPACT_PROMPT: str = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT ask follow-up questions.
+- You already have all the context you need in the conversation above.
+- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+
+Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions. The summary must be thorough in capturing the key information, decisions, and context essential for continuing the work without losing context.
+
+Before your final summary, wrap your analysis in <analysis> tags. In your analysis, go through the conversation chronologically and, for each part, identify: the user's explicit requests and intents; your approach to addressing them; key decisions and concepts; specific details (names, exact quotes, relevant excerpts, parameters); errors you ran into and how you fixed them; and any specific user feedback — especially where the user told you to do something differently. Then double-check for accuracy and completeness.
+
+Your summary should include the following sections:
+1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail.
+2. Key Technical Concepts: List all important concepts, technologies, and techniques discussed.
+3. Files and Code Sections: Enumerate specific files, resources, or artifacts examined, modified, or created. Include relevant excerpts and a note on why each matters.
+4. Errors and fixes: List all errors you ran into and how you fixed them, including any user feedback.
+5. Problem Solving: Document problems solved and any ongoing troubleshooting.
+6. All user messages: List ALL user messages that are not tool results. These are critical for understanding feedback and changing intent.
+7. Pending Tasks: Outline any pending tasks you have explicitly been asked to work on.
+8. Current Work: Describe precisely what was being worked on immediately before this summary request.
+9. Optional Next Step: List the next step that is directly in line with the user's most recent explicit request and the work in progress. Include direct quotes to avoid drift. Do not start tangential or already-completed work without confirming first.
+
+{domain_requirements}Output format:
+<analysis>your analysis (will be stripped)</analysis>
+<summary>your summary here</summary>
+
+REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."""
+
+# The user message that replaces the history: continuation framing (the session
+# resumes after a context cutoff), the extracted summary, then a resume-directly
+# directive (pick up the work without re-acknowledging the summary).
+COMPACT_SUMMARY_MESSAGE: str = (
+    "This session is being continued from a previous conversation that ran out of "
+    "context. The summary below covers the earlier portion of the conversation.\n\n"
+    "{summary}\n\n"
+    "Continue the conversation from where it left off without asking the user any "
+    "further questions. Resume directly — do not acknowledge the summary, do not recap "
+    "what was happening, do not preface with \"I'll continue\" or similar. Pick up the "
+    "last task as if the break never happened."
+)

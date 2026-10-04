@@ -86,9 +86,9 @@ For the vendor boundary and per-adapter differences, see the adapter differences
 The code was implemented in Phase order (each Phase verified independently):
 - **Phase 1 — Minimal loop**: single tool call → result → response. `messages/types.py`, `core/state.py`, `tools/base.py`, `tools/builtin/`, `api/provider.py`+adapters, `core/loop.py`.
 - **Phase 2 — Tool orchestration**: partitioning + parallel execution (`asyncio.gather` + `Semaphore`) + block order preservation. `tools/orchestrator.py`.
-- **Phase 3 — Context management**: external compact + overflow propagation (caller-driven). When `step()` raises `ContextOverflowError`, the caller trims the state, shrinks it with `engine.compact(state)` and retries. `context/compact.py` (compaction prompt + summary message; the summary call is `FridayAgent.compact()`), `messages/normalize.py`. For compaction behavior details, see `docs/architecture/04-context-compaction.md`.
+- **Phase 3 — Context management**: external compact + overflow propagation (caller-driven). When `step()` raises `ContextOverflowError`, the caller trims the state, shrinks it with `engine.compact(state)` and retries. `FridayAgent.compact()` (`core/engine.py`; prompt texts in `api/prompts.py`), `messages/normalize.py`. For compaction behavior details, see `docs/architecture/04-context-compaction.md`.
 
-Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `context/`(compact — compaction prompt + summary message, no recovery.py) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool). For per-file responsibilities, see `docs/architecture/00-overview.md#module-map`.
+Actual package structure (`friday_agent/`): `core/`(loop·engine·state) · `tools/`(base·orchestrator·builtin) · `api/`(provider·configs·anthropic_provider·openai_provider·prompts) · `messages/`(types·normalize) · `memory/`(store·tool). For per-file responsibilities, see `docs/architecture/00-overview.md#module-map`.
 
 ## Target Stack & Verification
 
