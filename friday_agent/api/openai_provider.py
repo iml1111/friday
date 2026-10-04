@@ -69,27 +69,6 @@ _CONTEXT_OVERFLOW_SIGNALS: tuple[str, ...] = (
 _IMAGE_OMITTED = "[image omitted: not supported by the OpenAI adapter]"
 
 
-def _flatten_tool_result_content(content) -> str:
-    """Flatten tool_result content to the text-only form OpenAI tool messages take.
-
-    A string passes through; a block array joins its text blocks and replaces
-    each image with _IMAGE_OMITTED; anything else is JSON-encoded.
-    """
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return json.dumps(content)
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text") or "")
-        elif isinstance(block, dict) and block.get("type") == "image":
-            parts.append(_IMAGE_OMITTED)
-        else:
-            parts.append(json.dumps(block))
-    return "\n".join(p for p in parts if p)
-
-
 class OpenAIProvider(LLMProvider[OpenAIConfig]):
     """LLMProvider adapter for the OpenAI Chat Completions API.
 
@@ -225,7 +204,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                     tool_msgs.append({
                         "role": "tool",
                         "tool_call_id": b.get("tool_use_id") or "",
-                        "content": _flatten_tool_result_content(b.get("content")),
+                        "content": OpenAIProvider._flatten_tool_result_content(b.get("content")),
                     })
 
             if role == "assistant":
@@ -248,6 +227,27 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                     out.append({"role": "user", "content": "".join(text_parts)})
 
         return out
+
+    @staticmethod
+    def _flatten_tool_result_content(content: str | list[dict] | None) -> str:
+        """Flatten tool_result content to the text-only form OpenAI tool messages take.
+
+        A string passes through; a block array joins its text blocks and replaces
+        each image with _IMAGE_OMITTED; anything else is JSON-encoded.
+        """
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return json.dumps(content)
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+            elif isinstance(block, dict) and block.get("type") == "image":
+                parts.append(_IMAGE_OMITTED)
+            else:
+                parts.append(json.dumps(block))
+        return "\n".join(p for p in parts if p)
 
     @staticmethod
     def _to_openai_tools(tools: list[dict]) -> list[dict]:
