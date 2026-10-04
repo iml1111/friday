@@ -6,32 +6,30 @@ from friday_agent.api.prompts import (
 )
 
 
-def test_assemble_returns_str_convertible():
-    """assemble_system_prompt returns a SystemPrompt convertible to str."""
-    result = assemble_system_prompt("PROMPT")
-    assert isinstance(str(result), str)
+def test_assemble_returns_plain_str():
+    assert isinstance(assemble_system_prompt("PROMPT"), str)
 
 
 def test_assemble_preserves_base_verbatim():
     """The base prompt is preserved verbatim in the output."""
-    s = str(assemble_system_prompt("You are a helpful assistant."))
+    s = assemble_system_prompt("You are a helpful assistant.")
     assert "You are a helpful assistant." in s
 
 
 def test_assemble_always_injects_general_guidance():
-    s = str(assemble_system_prompt("You are a research assistant."))
+    s = assemble_system_prompt("You are a research assistant.")
     assert s.endswith("You are a research assistant.")
     assert GENERAL_AGENT_GUIDANCE in s
 
 
 def test_assemble_empty_base_returns_general_then_todo_guidance():
-    s = str(assemble_system_prompt(""))
+    s = assemble_system_prompt("")
     assert s == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}"
 
 
 def test_assemble_always_injects_todo_guidance():
-    assert TODO_GUIDANCE in str(assemble_system_prompt("You are a research assistant."))
-    assert TODO_GUIDANCE in str(assemble_system_prompt(""))
+    assert TODO_GUIDANCE in assemble_system_prompt("You are a research assistant.")
+    assert TODO_GUIDANCE in assemble_system_prompt("")
 
 
 # --- Layer order: generic (SDK) -> specific (domain) -------------------------
@@ -40,14 +38,24 @@ def test_assemble_always_injects_todo_guidance():
 # used to half-neutralize domain policies in production.
 
 def test_general_guidance_precedes_base_prompt():
-    out = str(assemble_system_prompt("DOMAIN-PROMPT"))
+    out = assemble_system_prompt("DOMAIN-PROMPT")
     assert out.index(GENERAL_AGENT_GUIDANCE) < out.index("DOMAIN-PROMPT")
     assert out.index(TODO_GUIDANCE) < out.index("DOMAIN-PROMPT")
 
 
 def test_order_is_general_todo_base():
-    out = str(assemble_system_prompt("DOMAIN-PROMPT"))
+    out = assemble_system_prompt("DOMAIN-PROMPT")
     assert out == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\nDOMAIN-PROMPT"
+
+
+def test_memory_instructions_sit_between_guidance_and_base():
+    out = assemble_system_prompt("DOMAIN-PROMPT", "MEMORY-INSTRUCTIONS")
+    assert out == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\nMEMORY-INSTRUCTIONS\n\nDOMAIN-PROMPT"
+
+
+def test_memory_instructions_without_base():
+    out = assemble_system_prompt("", "MEMORY-INSTRUCTIONS")
+    assert out == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\nMEMORY-INSTRUCTIONS"
 
 
 def test_colon_rule_does_not_mandate_preamble_text():

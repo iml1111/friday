@@ -1,27 +1,11 @@
 """Prompt texts and system prompt assembly.
 
-``assemble_system_prompt`` injects the general agent guidance and wraps the
-result in a ``SystemPrompt`` that converts to a plain string for
-``LLMProvider.complete``. The compaction prompt and summary message used by
-``FridayAgent.compact`` live here too.
+``assemble_system_prompt`` is the one place the system prompt's sections are
+ordered; FridayAgent calls it once and sends the result on every request. The
+compaction prompt and summary message used by ``FridayAgent.compact`` live
+here too.
 """
 from __future__ import annotations
-
-from dataclasses import dataclass
-
-
-@dataclass
-class SystemPrompt:
-    """Final system prompt representation.
-
-    Wraps the assembled prompt string so it can be passed directly to
-    ``LLMProvider.complete(system_prompt=str(...))``.
-    """
-
-    text: str
-
-    def __str__(self) -> str:
-        return self.text
 
 
 GENERAL_AGENT_GUIDANCE: str = """# System
@@ -56,22 +40,22 @@ steps, call TodoWrite first to lay out the plan, then keep it updated as you go.
 The current list is surfaced to you each turn inside a <system-reminder>; it reflects tracked state, not necessarily the user's latest instruction."""
 
 
-def assemble_system_prompt(system_prompt: str) -> SystemPrompt:
-    """Assemble the full system prompt for a turn.
+def assemble_system_prompt(system_prompt: str, memory_instructions: str = "") -> str:
+    """Assemble the full system prompt.
 
-    Injects the always-on general agent guidance (``GENERAL_AGENT_GUIDANCE``) and the
-    todo-tracking guidance (``TODO_GUIDANCE``) BEFORE the caller's base prompt; there
-    is no opt-out. Order is generic -> specific: the caller's domain prompt comes last
-    so its rules (e.g. an utterance policy) override the generic guidance by recency.
+    Order is generic -> specific: the always-on general agent guidance
+    (``GENERAL_AGENT_GUIDANCE``) and todo-tracking guidance (``TODO_GUIDANCE``),
+    then the memory instructions, then the caller's domain prompt last so its
+    rules (e.g. an utterance policy) override the generic guidance by recency.
+    There is no opt-out for the two guidance blocks; empty sections are skipped.
 
     Args:
         system_prompt: The caller-provided base system prompt (may be empty).
-
-    Returns:
-        The fully assembled ``SystemPrompt``.
+        memory_instructions: MEMORY_INSTRUCTIONS when a memory store is mounted,
+            else empty.
     """
-    blocks = [b for b in (GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE, system_prompt) if b]
-    return SystemPrompt(text="\n\n".join(blocks))
+    blocks = (GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE, memory_instructions, system_prompt)
+    return "\n\n".join(b for b in blocks if b)
 
 
 # ---------------------------------------------------------------------------

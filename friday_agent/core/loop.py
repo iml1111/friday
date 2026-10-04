@@ -29,7 +29,6 @@ from friday_agent.api.provider import (
     ThinkingBlock,
     ToolUseBlock,
 )
-from friday_agent.api.prompts import assemble_system_prompt
 from friday_agent.core.state import LoopState, PendingToolUseError, Suspended, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import (
@@ -184,7 +183,8 @@ async def run_one_turn(
         tools: Available tool instances.
         tool_schemas: Pre-built JSON schemas for each tool.
         state: Input loop state restored from the previous turn or initial state.
-        system_prompt: Base system prompt text.
+        system_prompt: The full system prompt, sent verbatim (FridayAgent
+            assembles it once with assemble_system_prompt()).
         config: LLM call configuration. Defaults to provider.config_type().
         max_concurrency: Maximum concurrent tool executions passed to run_tools.
         turn_reminders: Pre-rendered turn-local reminder texts (e.g. a live
@@ -219,15 +219,12 @@ async def run_one_turn(
     reminder_texts.extend(turn_reminders or [])
     api_input_messages = with_turn_reminders(list(state.messages), reminder_texts)
 
-    # Assemble the full system prompt for this turn.
-    full_system_prompt = assemble_system_prompt(system_prompt)
-
     # Call the LLM.
     api_messages = normalize_for_api(api_input_messages)
     try:
         response = await provider.complete(
             messages=api_messages,
-            system_prompt=str(full_system_prompt),
+            system_prompt=system_prompt,
             tools=tool_schemas,
             config=config,
         )

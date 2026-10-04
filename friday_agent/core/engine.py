@@ -39,7 +39,9 @@ class FridayAgent:
     Args:
         provider: LLM backend instance (LLMProvider implementation). Required.
         tools: Available tools.
-        system_prompt: Base system prompt text.
+        system_prompt: Domain system prompt. assemble_system_prompt() puts the
+                SDK guidance (and MEMORY_INSTRUCTIONS when memory is mounted)
+                ahead of it.
         config: Vendor call configuration, passed directly (e.g. AnthropicConfig).
                 Defaults to the provider's default config (provider.config_type())
                 when None.
@@ -92,19 +94,14 @@ class FridayAgent:
             )
         self._provider = provider
         self._tools = assembled
-        self._system_prompt = system_prompt
+        # Assembled once: it heads the cached prefix, and step() and compact()
+        # both send it, so it must not change within a session.
+        self._system_prompt = assemble_system_prompt(
+            system_prompt, MEMORY_INSTRUCTIONS if memory is not None else ""
+        )
         self._config = config
         self._max_concurrency = max_concurrency
         self._compact_instructions = compact_instructions
-
-    def _effective_system_prompt(self) -> str:
-        """Static system prefix: memory instructions (when mounted) -> domain prompt.
-
-        Must stay byte-stable within a session — it heads the cached prefix, and
-        compact() reproduces it to read the conversation cache.
-        """
-        memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
-        return "\n\n".join(p for p in (memory_section, self._system_prompt) if p)
 
     def _tool_schemas(self) -> list[dict]:
         return [tool.get_tool_schema() for tool in self._tools]
@@ -145,13 +142,9 @@ class FridayAgent:
         """
         if pending := pending_tool_uses(state):
             raise PendingToolUseError([block.id or "" for block in pending])
-        # System prefix: static pieces only, ordered generic -> specific
-        # (memory instructions -> domain prompt) — must be byte-stable within a
-        # session so the cache prefix survives. Per-turn content (the live memory
-        # index, then the caller's turn_sections) is rebuilt every turn and rides
-        # messages[-1] as turn-local reminders instead — in the system prompt it
-        # would invalidate the whole conversation cache.
-        effective_prompt = self._effective_system_prompt()
+        # Per-turn content (the live memory index, then the caller's
+        # turn_sections) rides messages[-1] as turn-local reminders — in the
+        # system prompt it would invalidate the whole conversation cache.
         turn_reminders = (
             [await build_memory_reminder(self._memory)] if self._memory is not None else []
         )
@@ -162,7 +155,7 @@ class FridayAgent:
             tools=self._tools,
             tool_schemas=self._tool_schemas(),
             state=state,
-            system_prompt=effective_prompt,
+            system_prompt=self._system_prompt,
             config=self._config,
             max_concurrency=self._max_concurrency,
             turn_reminders=turn_reminders,
@@ -200,21 +193,20 @@ class FridayAgent:
             *normalize_for_api(state.messages),
             {"role": "user", "content": format_compact_prompt(self._compact_instructions)},
         ]
-        system_prompt = str(assemble_system_prompt(self._effective_system_prompt()))
         # Same config as step() (the message cache keys on settings such as
         # thinking); only the output budget is raised for the summary.
         config = copy.copy(self._config)
         config.max_tokens = max(self._config.max_tokens, 20_000)
 
         response = await self._provider.complete(
-            messages=messages, system_prompt=system_prompt, tools=self._tool_schemas(), config=config,
+            messages=messages, system_prompt=self._system_prompt, tools=self._tool_schemas(), config=config,
         )
         if self._has_tool_use(response) or self._extract_summary(self._response_text(response)) is None:
             # The shared prefix exposes the agent's tools: a tool call (or a reply
             # with no summary) is retried once without them — the only call that
             # pays the full price for the history. A tool_use never enters state.
             response = await self._provider.complete(
-                messages=messages, system_prompt=system_prompt, tools=[], config=config,
+                messages=messages, system_prompt=self._system_prompt, tools=[], config=config,
             )
 
         raw_text = self._response_text(response)

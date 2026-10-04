@@ -19,7 +19,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 
 > `Suspended` and `Terminal` are not serialized themselves — persist their `.state`. `Suspended.pending` is recomputable from that state via `pending_tool_uses()`.
 
-> **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.7 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
+> **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.6 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
 
 ---
 
@@ -162,19 +162,7 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 
 ---
 
-### 2.6 Prompts — `api/prompts.py` → details [03-llm-providers](03-llm-providers.md)
-
-#### `SystemPrompt`
-
-| Field | Type | Meaning |
-|---|---|---|
-| `text` | `str` | Fully assembled prompt |
-
-Implements `__str__`, so it is passed directly as `provider.complete(system_prompt=str(sp))`. Created by `assemble_system_prompt()`.
-
----
-
-### 2.7 Memory — `memory/store.py` → details [08-memory](08-memory.md)
+### 2.6 Memory — `memory/store.py` → details [08-memory](08-memory.md)
 
 Data models of the `MemoryStore` subsystem. All are **Store-local** and are not serialized into `LoopState` (container-local re-injection).
 

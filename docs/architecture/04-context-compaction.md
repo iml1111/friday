@@ -38,7 +38,7 @@ caller decides to compact (proactively, or after trimming an overflowed state)
 
 ### Items Preserved by COMPACT_PROMPT
 
-`COMPACT_PROMPT` in `api/prompts.py:95` instructs the LLM to preserve the following 9 items in the summary:
+`COMPACT_PROMPT` in `api/prompts.py:79` instructs the LLM to preserve the following 9 items in the summary:
 
 1. Primary Request and Intent
 2. Key Technical Concepts
@@ -116,10 +116,10 @@ See [01-core-loop](01-core-loop.md) for the full context of the call flow.
 ## ⑥ Maintenance Notes
 
 - **No tool calls reach state**: the first summary call carries the agent's tools; a `tool_use` reply is discarded and retried with `tools=[]`. Only the summary text is used, so `tool_use`↔`tool_result` pairing cannot break.
-- **`is_compact_summary=True` flag**: the summary user message built in `engine.compact()` is marked `is_compact_summary=True` (`core/engine.py:224`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
-- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary], turn_count=state.turn_count, todos=state.todos)` (`core/engine.py:226`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
+- **`is_compact_summary=True` flag**: the summary user message built in `engine.compact()` is marked `is_compact_summary=True` (`core/engine.py:216`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
+- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary], turn_count=state.turn_count, todos=state.todos)` (`core/engine.py:218`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
 - **`<summary>` extraction and fallback**: `FridayAgent._extract_summary()` (`core/engine.py`) finds `<summary>` and searches for `</summary>` only after it — a summarizer that mistakenly closes its `<analysis>` with `</summary>` would otherwise produce an empty summary and wipe the history. A missing pair or an empty body returns `None`, and the full response text is used instead. This is defensive code so the loop never halts on a format slip; lower format compliance degrades summary quality, so take care when modifying the prompt.
-- **Shared prefix**: `engine.compact()` builds the summary call's system prompt and tools with the same helpers `step()` uses (`_effective_system_prompt()`, `_tool_schemas()`) — a change to one path that skips the other silently loses the cache read.
+- **Shared prefix**: `engine.compact()` sends the same system prompt `step()` sends (`self._system_prompt`, assembled once in `__init__`) and builds its tools with the same helper (`_tool_schemas()`) — a change to one path that skips the other silently loses the cache read.
 - **Continuation framing**: `COMPACT_SUMMARY_MESSAGE` wraps the summary in a "continuing the previous conversation" preamble + a "resume directly, no further questions" directive. This is for smooth resumption after compaction; changing the body affects resume behavior.
 
 ---

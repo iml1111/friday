@@ -55,7 +55,7 @@ Core contract:
 
 ### Execution Path — `run_tools`
 
-`orchestrator.py:173` / `core/loop.py:42,267` — the only execution path that `run_one_turn()` calls directly.
+`orchestrator.py:173` / `core/loop.py:41,265` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
 # core/loop.py
@@ -186,7 +186,7 @@ ToolResult(
 |---|---|---|
 | Uses | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | Uses | `pydantic` | Input schema validation (`model_validate`, `model_json_schema`) |
-| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:42,267`) |
+| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:41,265`) |
 
 ---
 
