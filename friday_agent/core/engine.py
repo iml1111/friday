@@ -9,7 +9,7 @@ drives the turn loop by calling step() until the sentinel is a Terminal.
 from __future__ import annotations
 
 from collections import Counter
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
 from friday_agent.api.provider import LLMConfig, LLMProvider
 from friday_agent.context.compact import compact_conversation, create_compact_summary_message
@@ -21,9 +21,14 @@ from friday_agent.memory.store import (
 from friday_agent.core.loop import run_one_turn
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.normalize import normalize_for_api
-from friday_agent.messages.types import Message
+from friday_agent.messages.types import Message, wrap_system_reminder
 from friday_agent.tools.base import Tool
 from friday_agent.tools.builtin import builtin_tools
+
+# A per-turn section: rendered from the turn's input state on every step();
+# its output rides the trailing user message as a <system-reminder> (never
+# persisted, never part of the cached prefix).
+TurnSection = Callable[[LoopState], Awaitable[str]]
 
 
 class FridayAgent:
@@ -52,6 +57,14 @@ class FridayAgent:
                 (summarization runs under its own summarizer system prompt), so
                 this is the only way to steer what a summary must preserve.
                 Empty (the default) leaves the base prompt untouched.
+        turn_sections: Async callables rendered on every step() from the turn's
+                input state. Each non-empty output is wrapped in a
+                <system-reminder> and joined onto the trailing user message of
+                the API view only (after the todo reminder and the memory
+                index) — never persisted into LoopState, never part of the
+                cached prefix. Use for content that changes during a session
+                (current screen, progress); static content belongs in
+                system_prompt. Empty strings are dropped; exceptions propagate.
 
     Raises:
         ValueError: When config is given but its type does not match the
@@ -67,6 +80,7 @@ class FridayAgent:
         max_concurrency: int = 10,
         memory: MemoryStore | None = None,
         compact_instructions: str = "",
+        turn_sections: list[TurnSection] | None = None,
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -95,6 +109,7 @@ class FridayAgent:
         self._config = config
         self._max_concurrency = max_concurrency
         self._compact_instructions = compact_instructions
+        self._turn_sections = list(turn_sections or [])
 
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
@@ -115,15 +130,20 @@ class FridayAgent:
         """
         # System prefix: static pieces only, ordered generic -> specific
         # (memory instructions -> domain prompt) — must be byte-stable within a
-        # session so the cache prefix survives. The live memory index is rebuilt
-        # every turn and rides messages[-1] as a turn-local reminder instead —
-        # in the system prompt it would invalidate the whole conversation cache.
+        # session so the cache prefix survives. Per-turn content (the live memory
+        # index, then turn_sections outputs) is rebuilt every turn and rides
+        # messages[-1] as turn-local reminders instead — in the system prompt it
+        # would invalidate the whole conversation cache.
         memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
         parts = [p for p in (memory_section, self._system_prompt) if p]
         effective_prompt = "\n\n".join(parts)
         turn_reminders = (
             [await build_memory_reminder(self._memory)] if self._memory is not None else []
         )
+        for section in self._turn_sections:
+            text = await section(state)
+            if text:
+                turn_reminders.append(wrap_system_reminder(text))
         turn_reminders = [t for t in turn_reminders if t]
         tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(

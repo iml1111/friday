@@ -42,6 +42,8 @@ Emitting the serializable `LoopState` as-is at each turn boundary supports **sta
 
 In addition, `FridayAgent` always registers and injects **TodoWrite (todo tracking)** as a built-in with no caller wiring, while **memory (`MemoryStore`)** is opt-in — it is mounted only when a store is explicitly injected via the `memory=` argument. See [02-tool-orchestration](02-tool-orchestration.md) · [08-memory](08-memory.md) for details.
 
+Per-turn state the model should see (current screen, progress) goes through `turn_sections` — rendered every turn into a turn-local `<system-reminder>` on the last user message, never persisted and never part of the cached prefix (see [01-core-loop](01-core-loop.md)).
+
 ---
 
 ## Module Map

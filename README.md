@@ -130,6 +130,19 @@ engine = FridayAgent(
 
 The injected block is placed **after** the default prompt's 9-section spec and **before** the output-format instructions, with a header stating it "takes precedence over the generic sections" — covering both adding sections and redefining existing ones. If omitted (the default), the prompt is byte-for-byte unchanged. For details, see [04-context-compaction](docs/architecture/04-context-compaction.md).
 
+### Per-Turn Context (opt-in)
+
+For state that changes every turn (the current screen, progress so far), pass async sections. Each one receives the turn's input `LoopState` and returns text (`""` = nothing this turn):
+
+```python
+async def current_page(state):
+    return f"Current page: {browser.url}"
+
+engine = FridayAgent(provider=provider, turn_sections=[current_page])
+```
+
+Each non-empty output is wrapped in `<system-reminder>` and attached to the last user message of that turn's request only — it is never stored in `LoopState` and never breaks the prompt cache. Static content belongs in `system_prompt`.
+
 ---
 
 ## Built-in Capabilities

@@ -34,7 +34,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 ```
 1. api_input_messages = list(state.messages)
       └─ inject <system-reminder> via with_turn_reminders() (API view only · non-persistent):
-         in order: [todo reminder (when state.todos is set)] + turn_reminders param (engine passes memory index)
+         in order: [todo reminder (when state.todos is set)] + turn_reminders param (engine passes memory index, then turn_sections outputs)
       └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM call
 
 2. response → _to_assistant_message()     ← converted to internal Message, then yielded
@@ -78,12 +78,13 @@ FridayAgent(
     max_concurrency=10,
     memory=None,           # MemoryStore — if unset, memory subsystem not mounted (opt-in); the store is the tool surface
     compact_instructions="",  # domain requirements to insert into the compact() summary prompt; empty string leaves the prompt unchanged
+    turn_sections=None,    # per-turn sections: async (state) -> str, rendered every step(); turn-local <system-reminder> on messages[-1], never persisted
 )
 ```
 
 If `config` is not of type `provider.config_type`, `ValueError` is raised immediately.
 
-The context injection surface is intentionally simple: static content is passed by the caller as a single `system_prompt` string (multiple sections are combined on the caller side with `"\n\n".join(...)`). The engine has no injection surface for dynamic (per-turn varying) content — only SDK internals (todo · memory index) use the turn-local reminder machinery (`turn_reminders` of `run_one_turn`).
+The context injection surface is intentionally simple: static content is passed by the caller as a single `system_prompt` string (multiple sections are combined on the caller side with `"\n\n".join(...)`). Per-turn content has exactly one engine-level hook, `turn_sections`: each section is awaited with the turn's input `LoopState`, empty output is dropped, and the SDK wraps the rest in `<system-reminder>` (the prefix the Anthropic adapter's breakpoint skip detects) and joins it onto the trailing user message after the todo reminder and the memory index — the `turn_reminders` path of `run_one_turn`. A section that raises propagates.
 
 `system_prompt` is **turn-loop only** — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it. What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
 
@@ -145,7 +146,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 - **`tool_use↔tool_result` pair preservation.** `run_tools()` emits exactly one `tool_result` per executed `tool_use` (unknown tools and exceptions become error results), and the only error path (`LLMError` from the provider call) fires before an assistant message exists — so no unpaired `tool_use` is ever persisted. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
-- **Per-turn reminders are non-persistent.** Every turn, `run_one_turn()` uses `with_turn_reminders()` to merge `<system-reminder>` blocks (todo reminder + caller-provided `turn_reminders`) into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting.
+- **Per-turn reminders are non-persistent.** Every turn, `run_one_turn()` uses `with_turn_reminders()` to merge `<system-reminder>` blocks (todo reminder + caller-provided `turn_reminders`) into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting. `turn_sections` outputs follow the same path (after the memory index), so they never reach `LoopState`, the cached prefix, or `compact()`.
 
 ---
 
