@@ -5,9 +5,13 @@ histories the deferred flow produces.
 
   A. approve: the model calls the deferred `approval` tool (next to ExampleTool)
      → Suspended → the state crosses a JSON boundary → resume() with the
-     approval → step() completes.
+     approval → step() sends it.
   B. cancel: same start → resume() with an is_error result → a new user message
-     → step() completes.
+     → step() sends it.
+
+"Accepted" means the resumed request did not end in Terminal(model_error);
+whether the model then finishes (it may ask for approval again) is printed as
+model behavior, not asserted.
 
 Usage:
     LLM_MODEL=<model-id> python scripts/verify/verify_deferred.py
@@ -98,11 +102,16 @@ async def _phase(engine: FridayAgent, *, cancel: bool) -> dict[str, bool]:
 
     final = await _run(engine, state)
     print(f"  final : {_describe(final)}")
+    # A rejected request ends in Terminal(model_error); any other outcome means the
+    # API accepted the resumed history. Whether the model then finished is model
+    # behavior (it may ask for approval again), so it is printed, not asserted.
+    completed = isinstance(final, Terminal) and final.reason == "completed"
+    print(f"  completed: {completed} (informational)")
     return {
         "turn suspended on the deferred approval": True,
         "pending recomputed after the JSON round trip": [b.id for b in pending] == [b.id for b in first.pending],
-        "API accepted the resumed history (reason == 'completed')":
-            isinstance(final, Terminal) and final.reason == "completed",
+        "API accepted the resumed history (no model_error)":
+            not (isinstance(final, Terminal) and final.reason == "model_error"),
     }
 
 
