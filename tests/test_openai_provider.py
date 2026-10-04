@@ -226,6 +226,45 @@ def test_to_openai_messages_assistant_tool_only_has_null_content():
     assert out[0]["tool_calls"][0]["id"] == "c1"
 
 
+def test_to_openai_messages_tool_results_precede_trailing_text():
+    """A reminder riding a tool_result turn must not split tool_calls from their tool messages."""
+    messages = [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "c1", "name": "f", "input": {}},
+            {"type": "tool_use", "id": "c2", "name": "f", "input": {}},
+        ]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c1", "content": "r1"}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "c2", "content": "r2"},
+            {"type": "text", "text": "<system-reminder>\ntodo\n</system-reminder>"},
+        ]},
+    ]
+    out = OpenAIProvider._to_openai_messages(messages, "")
+
+    assert [m["role"] for m in out] == ["assistant", "tool", "tool", "user"]
+    assert [m.get("tool_call_id") for m in out[1:3]] == ["c1", "c2"]
+    assert out[3]["content"].startswith("<system-reminder>")
+
+
+def test_to_openai_messages_single_user_turn_with_many_results_and_text():
+    messages = [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "c1", "name": "f", "input": {}},
+            {"type": "tool_use", "id": "c2", "name": "f", "input": {}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "c1", "content": "r1"},
+            {"type": "tool_result", "tool_use_id": "c2", "content": "r2"},
+            {"type": "text", "text": "follow-up"},
+        ]},
+    ]
+    out = OpenAIProvider._to_openai_messages(messages, "")
+
+    assert [(m["role"], m.get("tool_call_id")) for m in out] == [
+        ("assistant", None), ("tool", "c1"), ("tool", "c2"), ("user", None),
+    ]
+
+
 def test_to_openai_tools():
     tools = [{
         "name": "search",

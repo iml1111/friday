@@ -156,7 +156,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
           - system_prompt → leading {"role": "system"} message
           - text blocks   → message content string
           - tool_use blocks (assistant) → assistant.tool_calls (arguments as JSON string)
-          - tool_result blocks (user)   → separate {"role": "tool", tool_call_id, content} message
+          - tool_result blocks (user)   → separate {"role": "tool", tool_call_id, content} messages, emitted before that turn's text
           - thinking blocks → no OpenAI equivalent; dropped
 
         The tool_use↔tool_result pairing invariant is preserved because the internal
@@ -213,10 +213,13 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                 if assistant_msg["content"] is not None or tool_calls:
                     out.append(assistant_msg)
             else:
-                # user turn: text becomes a user message; tool results become tool messages.
+                # user turn: tool results become tool messages, emitted FIRST —
+                # OpenAI requires tool messages to directly follow the assistant's
+                # tool_calls, and turn-local reminders ride the same user turn as
+                # the results. Any text follows as a user message.
+                out.extend(tool_msgs)
                 if text_parts:
                     out.append({"role": "user", "content": "".join(text_parts)})
-                out.extend(tool_msgs)
 
         return out
 
