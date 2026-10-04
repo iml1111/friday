@@ -22,7 +22,6 @@ from friday_agent.core.engine import FridayAgent
 from friday_agent.core.state import LoopState, Terminal
 from friday_agent.messages.types import Message, create_user_message
 from friday_agent.tools.builtin.example_tool import ExampleTool
-from friday_agent.tools.builtin.todo_write import TodoWrite
 
 
 class _Recording:
@@ -72,7 +71,7 @@ async def main() -> int:
         "THEN call ExampleTool once to process the text 'hello'. "
         "THEN mark both todos completed via TodoWrite and give a one-sentence summary. Stop."
     )
-    engine = FridayAgent(provider=provider, tools=[TodoWrite(), ExampleTool()],
+    engine = FridayAgent(provider=provider, tools=[ExampleTool()],  # TodoWrite is SDK-registered
                          system_prompt=system_prompt, config=config)
 
     user_message = "Please complete the two-step task and track it with todos."
