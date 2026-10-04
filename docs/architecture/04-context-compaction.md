@@ -42,7 +42,7 @@ step() → ContextOverflowError raise
 
 ### Items Preserved by COMPACT_PROMPT
 
-`_COMPACT_PROMPT_HEAD` in `context/compact.py:37` instructs the LLM to preserve the following 9 items in the summary:
+`_COMPACT_PROMPT_HEAD` in `context/compact.py:39` instructs the LLM to preserve the following 9 items in the summary:
 
 1. Primary Request and Intent
 2. Key Technical Concepts
@@ -56,7 +56,7 @@ step() → ContextOverflowError raise
 
 The output format is `<analysis>scratchpad</analysis><summary>summary body</summary>`, and the `<analysis>` block is discarded on extraction. Beyond the 9 items, `COMPACT_PROMPT` includes systematic analysis instructions and a format trailer to raise `<summary>` format compliance (based on the original `services/compact/prompt.ts`, with development-specific wording generalized).
 
-**The no-tools guard appears only once** (the first `CRITICAL:` line). By default `compact_conversation` calls with `tools=[]`, and both adapters omit the `tools` field entirely when the list is empty (`anthropic_provider.py:145-146`, `openai_provider.py:142-143`), so the model cannot produce a `tool_use` block in the first place (with `reuse_prefix=True` the agent's tools are sent, and a `tool_use` reply is retried once with `tools=[]`). The one remaining occurrence is belt-and-suspenders for third-party `LLMProvider` implementations that ignore the `tools` argument — the repetitions were dead letters and were removed. Regression guard: `tests/test_compact.py::test_no_tools_guard_appears_exactly_once`.
+**The no-tools guard appears only once** (the first `CRITICAL:` line). By default `compact_conversation` calls with `tools=[]`, and both adapters omit the `tools` field entirely when the list is empty (`anthropic_provider.py:145-146`, `openai_provider.py:168-169`), so the model cannot produce a `tool_use` block in the first place (with `reuse_prefix=True` the agent's tools are sent, and a `tool_use` reply is retried once with `tools=[]`). The one remaining occurrence is belt-and-suspenders for third-party `LLMProvider` implementations that ignore the `tools` argument — the repetitions were dead letters and were removed. Regression guard: `tests/test_compact.py::test_no_tools_guard_appears_exactly_once`.
 
 ### Domain Instruction Injection Slot (opt-in)
 
@@ -146,8 +146,8 @@ See [01-core-loop](01-core-loop.md) for the full context of the call flow.
 ## ⑥ Maintenance Notes
 
 - **No tool calls reach state**: on the default path, the `complete()` call inside `compact_conversation()` uses `tools=[]` — the enforcement mechanism (the prompt's no-tools line only helps third-party providers). With `reuse_prefix`, the first call carries the agent's tools; a `tool_use` reply is discarded and retried with `tools=[]`. Either way only the summary text is used, so `tool_use`↔`tool_result` pairing cannot break.
-- **`is_compact_summary=True` flag**: the user message produced by `create_compact_summary_message()` is marked `is_compact_summary=True` (`context/compact.py:122`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
-- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary_message], turn_count=state.turn_count)` (`core/engine.py:163`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
+- **`is_compact_summary=True` flag**: the user message produced by `create_compact_summary_message()` is marked `is_compact_summary=True` (`context/compact.py:124`). This flag ties into the message type classification in [05-messages](05-messages.md); removing or omitting it can cause message filtering logic to misclassify the summary message as a regular user message.
+- **`turn_count` preserved**: `engine.compact()` returns `LoopState(messages=[summary_message], turn_count=state.turn_count)` (`core/engine.py:221`). `turn_count` must not be reset after reduction so that observability metrics are maintained.
 - **`<summary>` extraction and fallback**: `_extract_summary()` (`context/compact.py`) finds `<summary>` and searches for `</summary>` only after it — a summarizer that mistakenly closes its `<analysis>` with `</summary>` would otherwise produce an empty summary and wipe the history. A missing pair or an empty body returns `None`, and the full response text is used instead. This is defensive code so the loop never halts on a format slip; lower format compliance degrades summary quality, so take care when modifying the prompt.
 - **Separate summarizer system (default)**: by default the summary call runs under the dedicated `SUMMARIZER_SYSTEM_PROMPT`; `engine.compact()` passes the agent's own system prompt only with `reuse_prefix=True`.
 - **Continuation framing**: `create_compact_summary_message()` wraps the summary in a "continuing the previous conversation" preamble + a "resume directly, no further questions" directive. This is for smooth resumption after compaction; changing the body affects resume behavior.

@@ -29,7 +29,7 @@ Core contract:
 
 ### Partitioning (`partition_tool_calls`)
 
-`orchestrator.py:67` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
+`orchestrator.py:84` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
 
 ```
 [RO, RO, RO, MUT, RO, RO]
@@ -41,13 +41,13 @@ Core contract:
 
 **Merge rule**: consecutive concurrency-safe blocks are merged into one parallel batch. A non-safe block always becomes its own batch.
 
-**Conservative fallback** (`orchestrator.py:40–64`): treated as non-safe if any of the following applies.
+**Conservative fallback** (`orchestrator.py:38–61`): treated as non-safe if any of the following applies.
 - Tool not found (unknown tool)
 - Input is `None`
 - Pydantic schema validation fails
 - `is_concurrency_safe()` itself raises an exception
 
-**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:40–64`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:62`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
+**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:48–61`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:59`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
 
 **Deferred calls**: before partitioning, `run_one_turn` holds back every call for which `is_deferred_call()` is true — the tool's `is_deferred(input)` after the same conservative checks (unknown tool, `None` or invalid input, or a raising predicate → not deferred, so the call runs inline and the model gets an immediate error). Only the remaining calls are partitioned and run; the deferred ones end the turn as `Suspended` ([01-core-loop](01-core-loop.md)).
 
@@ -55,7 +55,7 @@ Core contract:
 
 ### Execution Path — `run_tools`
 
-`orchestrator.py:144` / `core/loop.py:40,261` — the only execution path that `run_one_turn()` calls directly.
+`orchestrator.py:171` / `core/loop.py:42,267` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
 # core/loop.py
@@ -127,13 +127,13 @@ class WeatherTool(Tool):
         return ToolResult(data=f"{parsed.city}: sunny, 22°C")
 ```
 
-To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:40–64`) consults only this single predicate.
+To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:48–61`) consults only this single predicate.
 
 ---
 
 ### `Tool` Methods — Conservative Defaults
 
-`tools/base.py:139`
+`tools/base.py:140`
 
 | Method | Return Type | Default | Description |
 |---|---|---|---|

@@ -27,7 +27,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 ## ③ Core Behavior — `run_one_turn()` Turn Lifecycle
 
-`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:167`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`Terminal` or `LoopState`) at the end and finishes.
+`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:162`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`Terminal` or `LoopState`) at the end and finishes.
 
 ### Execution Order
 
@@ -146,8 +146,8 @@ async for item in engine.step(state): ...        # the next turn, as usual
 
 | Type | Defined At | Role |
 |---|---|---|
-| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:34` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
-| `Terminal(reason, error=None, state=None)` | `core/state.py:19` | Loop termination sentinel; `state` is always set by the loop |
+| `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:41` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
+| `Terminal(reason, error=None, state=None)` | `core/state.py:20` | Loop termination sentinel; `state` is always set by the loop |
 | `Suspended(state, pending)` | `core/state.py` | "Paused on deferred tool calls" sentinel; persist `state`, `pending` is recomputable via `pending_tool_uses()` |
 
 ---
