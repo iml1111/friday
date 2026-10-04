@@ -1,4 +1,4 @@
-"""Engine integration: opt-in memory, replaceable store, collision, compact-clean."""
+"""Engine integration: opt-in memory, replaceable store, collision, compact prefix."""
 import pytest
 from pydantic import BaseModel
 
@@ -107,15 +107,20 @@ async def test_injected_store_tools_replace_defaults():
 
 
 @pytest.mark.asyncio
-async def test_compact_does_not_inject_memory_section():
+async def test_compact_shares_memory_instructions_but_not_the_index():
+    """The static instructions are part of step()'s cached prefix, so the summary
+    call carries them; the live index is turn-local and never reaches it."""
     summary = AssistantResponse(
         content=[TextBlock(text="<summary>S</summary>")],
         stop_reason=StopReason.END_TURN, usage=TokenUsage(),
     )
+    store = InMemoryStore()
+    await store.save(MemoryEntry(name="index-only-entry", description="d", type=MemoryType.user, body="b"))
     fake = FakeLLMProvider(responses=[summary])
-    engine = FridayAgent(provider=fake, tools=[], system_prompt="BASE", memory=InMemoryStore())
+    engine = FridayAgent(provider=fake, tools=[], system_prompt="BASE", memory=store)
     await engine.compact(LoopState(messages=[create_user_message("a")], turn_count=1))
-    assert MEMORY_INSTRUCTIONS not in fake.received_system_prompts[0]
+    assert MEMORY_INSTRUCTIONS in fake.received_system_prompts[0]
+    assert "index-only-entry" not in str(fake.received_messages[0])
 
 
 @pytest.mark.asyncio

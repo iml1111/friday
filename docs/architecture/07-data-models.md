@@ -14,10 +14,12 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 |---|---|---|---|
 | `Message` | `messages/types.py` | ✅ | Conversation history unit |
 | `ContentBlock` (internal flat) | `messages/types.py` | ✅ | Block inside a Message |
-| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` |
+| `LoopState` | `core/state.py` | ✅ | Loop state (messages + turn_count + todos) + turn-boundary "continue" resume sentinel — the transport unit is `json.dumps(loopstate.to_dict())` — persisted as-is, or as `Suspended.state` / `Terminal.state` |
 | Everything else | — | ❌ | Runtime-only (provider, config, responses, tool results, etc.) |
 
-> **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.7 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
+> `Suspended` and `Terminal` are not serialized themselves — persist their `.state`. `Suspended.pending` is recomputable from that state via `pending_tool_uses()`.
+
+> **Memory models are Store-local runtime objects** — `MemoryEntry`/`IndexEntry` (2.6 below) are not serialized into `LoopState`, and `MemoryStore` is re-injected per container, same as provider and tools. Memory bodies never leak into `LoopState.to_dict()`.
 
 ---
 
@@ -46,7 +48,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 | `type` | All | `text` \| `tool_use` \| `tool_result` \| `thinking` |
 | `text` | `text`·`thinking` | Text / thinking content |
 | `id`·`name`·`input` | `tool_use` | Call ID · tool name · arguments (dict, parsed by the SDK) |
-| `tool_use_id`·`content`·`is_error` | `tool_result` | Matching tool_use ID · result text · error flag |
+| `tool_use_id`·`content`·`is_error` | `tool_result` | Matching tool_use ID · result text (or a `[text, image]` block array) · error flag |
 
 > **⚠️ Name collision**: this `ContentBlock` (internal flat dataclass) and the `ContentBlock` in `api/provider.py` (2.3 below, a Union alias) **share only the name and are distinct types**. When importing both into the same scope, distinguish them with `as`.
 
@@ -72,14 +74,22 @@ Non-serializable runtime objects such as provider and config are intentionally e
 |---|---|---|
 | `reason` | `str` | Termination reason |
 | `error` | `Exception \| None` | Error object (on model_error) |
+| `state` | `LoopState \| None` | State to persist — `completed`: input + assistant message (`turn_count+1`); `model_error`: the input state. Always set by the loop |
 
 > **Note**: `run_one_turn()` emits two reasons: `completed` and `model_error`. Context overflow is not a Terminal; it is raised to the caller as `ContextOverflowError`.
+
+#### `Suspended` — the "paused on deferred tool calls" sentinel
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | `LoopState` | State to persist: input + assistant message + results of the calls that ran (`turn_count+1`, todos updated) |
+| `pending` | `list[ContentBlock]` | Deferred `tool_use` blocks in `tool_use` order — recomputable via `pending_tool_uses(state)`, so not serialized |
 
 ---
 
 ### 2.3 LLM Response (wire) — `api/provider.py` → details [03-llm-providers](03-llm-providers.md)
 
-The result of `provider.complete()` normalizing a vendor response. `loop._to_assistant_message()` converts it into the internal `Message`/`ContentBlock`.
+The result of `provider.complete()` normalizing a vendor response. `run_one_turn()` converts it into the internal `Message`/`ContentBlock`.
 
 #### `AssistantResponse`
 
@@ -114,7 +124,7 @@ The result of `provider.complete()` normalizing a vendor response. `loop._to_ass
 
 #### Exception hierarchy (not models, but flow-control types)
 
-`LLMError`(base) → `RateLimitError` · `ContextOverflowError` · `AuthError` · `TransientError`. **`ContextOverflowError` triggers caller-driven compact** ([04-context-compaction](04-context-compaction.md)).
+`LLMError`(base) → `RateLimitError` · `ContextOverflowError` · `AuthError` · `TransientError`. **`ContextOverflowError` triggers caller-driven compact** ([04-context-compaction](04-context-compaction.md)). `PendingToolUseError` (`core/state.py`) is deliberately **not** an `LLMError`: a `ValueError` raised by `step()`/`compact()` when the state still has unanswered `tool_use` blocks ([01-core-loop](01-core-loop.md)).
 
 ---
 
@@ -141,6 +151,17 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 | `data` | `Any` | Execution result (string/structured data) |
 | `is_error` | `bool` | Error flag (default `False`) |
 | `state_effect` | `dict \| None` | Declarative loop-state mutation (e.g. `{"todos": [...]}`); applied by the loop, default `None` |
+| `image` | `dict \| None` | `{"media_type", "data"}` (base64) — sent as an image block next to the text; default `None` |
+
+#### `ToolSchema` (TypedDict, `api/provider.py`) — one tool definition as the model sees it
+
+| Key | Type | Meaning |
+|---|---|---|
+| `name` | `str` | Tool name the model calls |
+| `description` | `str` | Model-facing description |
+| `input_schema` | `dict[str, Any]` | JSON Schema of the input (from the Pydantic model, wire-dieted) |
+
+Built by `Tool.get_tool_schema()` and passed to `LLMProvider.complete(tools=...)`; a plain dict at runtime.
 
 #### `Batch` (orchestrator-internal) — partitioning output
 
@@ -151,19 +172,7 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 
 ---
 
-### 2.6 Prompts — `api/prompts.py` → details [03-llm-providers](03-llm-providers.md)
-
-#### `SystemPrompt`
-
-| Field | Type | Meaning |
-|---|---|---|
-| `text` | `str` | Fully assembled prompt |
-
-Implements `__str__`, so it is passed directly as `provider.complete(system_prompt=str(sp))`. Created by `assemble_system_prompt()`.
-
----
-
-### 2.7 Memory — `memory/store.py` → details [08-memory](08-memory.md)
+### 2.6 Memory — `memory/store.py` → details [08-memory](08-memory.md)
 
 Data models of the `MemoryStore` subsystem. All are **Store-local** and are not serialized into `LoopState` (container-local re-injection).
 
@@ -199,7 +208,7 @@ Data models of the `MemoryStore` subsystem. All are **Store-local** and are not 
 ```
 provider.complete()
    └─ AssistantResponse(content=[TextBlock|ToolUseBlock|ThinkingBlock], stop_reason, usage)
-        │  _to_assistant_message()          ← wire union → internal flat conversion
+        │  run_one_turn()                   ← wire union → internal flat conversion
         ▼
    Message(content=[ContentBlock(flat)])    ← accumulated in state.messages
         │  normalize_for_api()              ← internal → API wire dict (excludes is_meta · thinking verbatim)
@@ -207,7 +216,7 @@ provider.complete()
    list[dict]  → next provider.complete()
 
 [turn-boundary transport]
-   LoopState(messages=[Message], turn_count)
+   LoopState(messages=[Message], turn_count, todos)   ← itself, Suspended.state or Terminal.state
         └─ json.dumps(loopstate.to_dict())   ← distributed resume unit
 ```
 

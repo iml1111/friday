@@ -10,7 +10,7 @@ The core is a turn loop that the caller drives by repeatedly calling `FridayAgen
 User message → LLM call → stop_reason branch
                               ├─ end_turn  → stop (Terminal)
                               └─ tool_use  → run tools → append tool_result to conversation → loop again
-                                            (ContextOverflowError → caller runs engine.compact(state) → retry)
+                                            (ContextOverflowError → caller trims, runs engine.compact(state) → retry)
 ```
 
 > `docs/architecture/` is the implementation-centric source of truth. For the architecture big picture,
@@ -104,18 +104,21 @@ while True:
             else:
                 print(item)                     # handle assistant responses / tool_result in real time
     except ContextOverflowError:
-        state = await engine.compact(state)     # summarize the conversation, then retry
+        # compact() re-sends step()'s exact prefix, so trim first (your policy —
+        # e.g. drop the oldest turns, keeping tool_use/tool_result pairs; one
+        # version: _trim_and_compact in scripts/run_agent.py).
+        state = await engine.compact(drop_oldest_turns(state))
         continue
     if isinstance(outcome, Terminal):
         break                                   # stop
     state = outcome                             # next turn (use the LoopState as-is)
 ```
 
-If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`.
+If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`, and `terminal.state` is the state to keep — append the next user message to it to continue the conversation, or pass it to `step()` again to retry a `model_error`.
 
 ### Injecting Domain Requirements into Compaction (opt-in)
 
-The summarization call in `engine.compact()` runs with a dedicated summarizer system prompt, so `system_prompt` does not reach it. "What must the summary always retain in this domain" is passed via the constructor.
+The summarization call in `engine.compact()` carries `system_prompt` only as the shared cache prefix; the compaction prompt after it governs the reply. "What must the summary always retain in this domain" is passed via the constructor.
 
 ```python
 engine = FridayAgent(
@@ -129,6 +132,19 @@ engine = FridayAgent(
 ```
 
 The injected block is placed **after** the default prompt's 9-section spec and **before** the output-format instructions, with a header stating it "takes precedence over the generic sections" — covering both adding sections and redefining existing ones. If omitted (the default), the prompt is byte-for-byte unchanged. For details, see [04-context-compaction](docs/architecture/04-context-compaction.md).
+
+The summary call always sends the agent's own system prompt, tools and config, so the provider serves the conversation from its prompt cache instead of writing it again. The flip side: it is `step()`'s request plus the compaction prompt, so a state that overflowed `step()` overflows it too. Compact proactively, before the window fills; after a `ContextOverflowError`, trim the state yourself before calling `compact()`.
+
+### Per-Turn Context (opt-in)
+
+For state that changes every turn (the current screen, progress so far), pass strings to `step()`. They apply to that call only, so each call can pass different sections or none (`""` entries are dropped):
+
+```python
+async for item in engine.step(state, turn_sections=[f"Current page: {browser.url}"]):
+    ...
+```
+
+Each non-empty output is wrapped in `<system-reminder>` and attached to the last user message of that turn's request only — it is never stored in `LoopState` and never breaks the prompt cache. Static content belongs in `system_prompt`.
 
 ---
 
@@ -192,11 +208,13 @@ class WeatherTool(Tool):
 
 Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model can call it.
 
+A tool can return an image next to its text — `ToolResult(data="Captured.", image={"media_type": "image/png", "data": b64})`. Anthropic models see the image; the OpenAI adapter sends the text plus an `[image omitted ...]` marker.
+
 > `TodoWrite` (always) and the memory tools (`memory_save`/`memory_read`/`memory_delete`, when `memory=` is mounted) are registered by the SDK, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities)).
 
 #### How the LLM Recognizes Tools
 
-Everything the model relies on to judge "what this tool is and how to call it" reduces to the **3 keys** built by `Tool.get_tool_schema()`
+Everything the model relies on to judge "what this tool is and how to call it" reduces to the **3 keys** built by `Tool.get_tool_schema()` (typed as `ToolSchema`)
 (`friday_agent/tools/base.py`). The schema that the `WeatherTool` above actually
 sends is as follows (passed to the API as-is):
 
@@ -227,11 +245,12 @@ So getting the LLM to recognize a tool "well" comes down to **writing these thre
 
 #### Execution Policy Methods Are Not Sent to the LLM
 
-`is_concurrency_safe` is **not included** in
+`is_concurrency_safe` and `is_deferred` are **not included** in
 the schema. It is not for the model's awareness — it is a runtime signal by which **the orchestrator controls execution**:
 
 > Only tools whose `is_concurrency_safe()` is `True` run in a parallel batch (read-only tools are the typical example).
 > Tools that change external state (mutating) return `False` from `is_concurrency_safe()` and run sequentially.
+> A tool whose `is_deferred()` is `True` is not run by `step()` at all — its result arrives later (see [Deferred Tools](#deferred-tools-results-that-arrive-later)).
 > For tool partitioning details, see [02-tool-orchestration](docs/architecture/02-tool-orchestration.md).
 
 ### ② LLM Backend (LLMProvider)
@@ -263,7 +282,7 @@ class MyProvider(LLMProvider[MyConfig]):
             stop_reason=StopReason.END_TURN,         # TOOL_USE / MAX_TOKENS / END_TURN
             usage=TokenUsage(input_tokens=resp.in_, output_tokens=resp.out),
         )
-        # on context overflow, raise ContextOverflowError → caller runs engine.compact(state), then retries
+        # on context overflow, raise ContextOverflowError → caller trims + runs engine.compact(state), then retries
 ```
 
 Implementation contract:
@@ -337,3 +356,34 @@ async for item in engine.step(state):           # next turn … repeat until Ter
 ```
 
 Because the loop state is only ever updated at clean turn boundaries (preserving `tool_use`↔`tool_result` integrity), `LoopState` can be serialized and resumed as-is. For design details, see [01-core-loop](docs/architecture/01-core-loop.md).
+
+### Deferred Tools (results that arrive later)
+
+Some results cannot be produced inside `step()` — a human approval, a job that runs elsewhere. Mark the tool deferred and the turn pauses instead of waiting:
+
+```python
+from friday_agent.core.loop import pending_tool_uses, resume
+from friday_agent.core.state import Suspended
+
+class SendEmail(Tool):
+    ...
+    def is_deferred(self, input: dict) -> bool:
+        return True                                   # step() holds every valid call
+
+# Request handler — the turn ends with Suspended
+async for item in engine.step(state):
+    outcome = item
+if isinstance(outcome, Suspended):
+    save(json.dumps(outcome.state.to_dict()))         # other tools' results are already in it
+    for call in outcome.pending:                      # deferred tool_use blocks (id, name, input)
+        request_approval(call.id, call.input)
+
+# Hours later, any process (no provider needed)
+state = LoopState.from_dict(json.loads(load()))
+state = resume(state, {call_id: ToolResult(data="Sent.")})   # or ToolResult(..., is_error=True) to cancel
+save(json.dumps(state.to_dict()))                     # then run the next turn with engine.step(state)
+```
+
+Calling `step()` on a state that still has unanswered calls raises `PendingToolUseError` before any request.
+
+`call()` is the inline fallback: it still runs for calls that are not deferred — including input that fails schema validation, which it receives raw — so validate `args` in `call()` as in the tool guide above. If `is_deferred()` raises on valid input, the call is held anyway (fail closed).

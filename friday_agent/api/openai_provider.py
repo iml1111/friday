@@ -36,6 +36,7 @@ from friday_agent.api.provider import (
     StopReason,
     TextBlock,
     TokenUsage,
+    ToolSchema,
     ToolUseBlock,
     TransientError,
 )
@@ -62,7 +63,6 @@ _CONTEXT_OVERFLOW_SIGNALS: tuple[str, ...] = (
     "reduce the length",
     "too many tokens",
 )
-
 
 class OpenAIProvider(LLMProvider[OpenAIConfig]):
     """LLMProvider adapter for the OpenAI Chat Completions API.
@@ -108,7 +108,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: OpenAIConfig | None,
     ) -> AssistantResponse:
         """Execute a single completion call.
@@ -127,7 +127,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         cfg: OpenAIConfig,
     ) -> dict:
         """Build kwargs for `chat.completions.create()`."""
@@ -156,7 +156,8 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
           - system_prompt → leading {"role": "system"} message
           - text blocks   → message content string
           - tool_use blocks (assistant) → assistant.tool_calls (arguments as JSON string)
-          - tool_result blocks (user)   → separate {"role": "tool", tool_call_id, content} message
+          - tool_result blocks (user)   → separate {"role": "tool", tool_call_id, content} messages, emitted before that turn's text
+          - tool_result block arrays → text joined, images replaced by a marker (_flatten_tool_result_content)
           - thinking blocks → no OpenAI equivalent; dropped
 
         The tool_use↔tool_result pairing invariant is preserved because the internal
@@ -195,11 +196,10 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                         },
                     })
                 elif btype == "tool_result":
-                    content = b.get("content")
                     tool_msgs.append({
                         "role": "tool",
                         "tool_call_id": b.get("tool_use_id") or "",
-                        "content": content if isinstance(content, str) else json.dumps(content),
+                        "content": OpenAIProvider._flatten_tool_result_content(b.get("content")),
                     })
 
             if role == "assistant":
@@ -213,31 +213,57 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                 if assistant_msg["content"] is not None or tool_calls:
                     out.append(assistant_msg)
             else:
-                # user turn: text becomes a user message; tool results become tool messages.
+                # user turn: tool results become tool messages, emitted FIRST —
+                # OpenAI requires tool messages to directly follow the assistant's
+                # tool_calls, and turn-local reminders ride the same user turn as
+                # the results. Any text follows as a user message.
+                out.extend(tool_msgs)
                 if text_parts:
                     out.append({"role": "user", "content": "".join(text_parts)})
-                out.extend(tool_msgs)
 
         return out
 
     @staticmethod
-    def _to_openai_tools(tools: list[dict]) -> list[dict]:
+    def _flatten_tool_result_content(content: str | list[dict] | None) -> str:
+        """Flatten tool_result content to the text-only form OpenAI tool messages take.
+
+        A string passes through; a block array joins its text blocks and replaces
+        each image with a text marker; anything else is JSON-encoded.
+        """
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return json.dumps(content)
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+            elif isinstance(block, dict) and block.get("type") == "image":
+                # Tool messages are text-only, and sending the base64 would add
+                # tokens without the model ever seeing the image.
+                parts.append("[image omitted: not supported by the OpenAI adapter]")
+            else:
+                parts.append(json.dumps(block))
+        return "\n".join(p for p in parts if p)
+
+    @staticmethod
+    def _to_openai_tools(tools: list[ToolSchema]) -> list[dict]:
         """Convert internal (Anthropic-format) tool defs to OpenAI function tool format.
 
         Internal: {name, description, input_schema}
         OpenAI:   {type: "function", function: {name, description, parameters}}
         """
-        out: list[dict] = []
-        for tool in tools or []:
-            out.append({
+        return [
+            {
                 "type": "function",
                 "function": {
-                    "name": tool.get("name", ""),
-                    "description": tool.get("description", "") or "",
-                    "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
                 },
-            })
-        return out
+            }
+            for tool in tools
+        ]
 
     # -- normalize ---------------------------------------------------------
     def normalize(self, native_response) -> AssistantResponse:

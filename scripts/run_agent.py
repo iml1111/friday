@@ -31,6 +31,7 @@ Cost guardrail: max_tokens=1024; caller-side turn cap = 30 per input to limit sp
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -53,6 +54,29 @@ _SYSTEM_PROMPT = (
     "When the user asks you to process some text, call ExampleTool with that text "
     "as the payload, then report the tool's result."
 )
+
+
+def _drop_oldest_turn(state: LoopState) -> LoopState:
+    """Drop the oldest user turn — its user message through the replies and tool
+    results before the next one — so tool_use/tool_result pairs stay together."""
+    starts = [
+        i for i, m in enumerate(state.messages)
+        if m.type == "user" and m.content and m.content[0].type == "text"
+    ]
+    if len(starts) < 2:
+        raise ContextOverflowError("the latest turn alone exceeds the context window")
+    return dataclasses.replace(state, messages=state.messages[starts[1]:])
+
+
+async def _trim_and_compact(engine: FridayAgent, state: LoopState) -> LoopState:
+    """compact() re-sends step()'s exact prefix, so a state that overflowed step()
+    overflows the summary call too: drop the oldest turns until it fits."""
+    while True:
+        state = _drop_oldest_turn(state)
+        try:
+            return await engine.compact(state)
+        except ContextOverflowError:
+            continue
 
 
 def _print_new_messages(messages: list[Message]) -> None:
@@ -124,8 +148,8 @@ async def main() -> int:
                             _print_new_messages([item])   # per-message live render
                             collected.append(item)
                 except ContextOverflowError:
-                    print("  ── [context overflow → compacting] ──")
-                    state = await engine.compact(state)
+                    print("  ── [context overflow → trimming + compacting] ──")
+                    state = await _trim_and_compact(engine, state)
                     continue
                 turns += 1
                 if isinstance(outcome, LoopState) and outcome.todos != prev_todos:

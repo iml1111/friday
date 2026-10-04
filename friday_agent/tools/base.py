@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from friday_agent.api.provider import ToolSchema
+
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -19,6 +21,7 @@ class ToolResult:
     data: Any                          # execution result (string or structured data)
     is_error: bool = False
     state_effect: dict | None = None   # declarative loop-state mutation, e.g. {"todos": [...]}
+    image: dict | None = None          # {"media_type": "image/png", "data": "<base64>"} — sent next to data
 
 
 # ---------------------------------------------------------------------------
@@ -140,12 +143,24 @@ class Tool(ABC):
         """Return whether this call can run in parallel with other tools. Defaults to False (conservative)."""
         return False
 
+    def is_deferred(self, input: dict) -> bool:
+        """Return whether this call's result arrives later, outside step(). Defaults to False.
+
+        A deferred call is not executed by step(): the turn ends with
+        Suspended(state, pending) and the caller attaches the result later with
+        resume(). If this raises on valid input, the call is held as deferred
+        (fail closed). call() still runs for calls this returns False for —
+        including calls whose input fails schema validation, which are never
+        deferred and reach call() raw, so call() must validate its input.
+        """
+        return False
+
     @abstractmethod
     async def call(self, args: dict) -> ToolResult:
         """Execute the tool and return a ToolResult."""
         ...
 
-    def get_tool_schema(self) -> dict:
+    def get_tool_schema(self) -> ToolSchema:
         """Build the tool schema dict to send to the API."""
         schema = _inline_defs(self.input_schema().model_json_schema())
         # Strip cosmetic titles everywhere (top-level and nested). $defs/$ref are

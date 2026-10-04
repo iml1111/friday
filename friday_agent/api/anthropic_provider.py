@@ -22,6 +22,7 @@ from friday_agent.api.provider import (
     TextBlock,
     ThinkingBlock,
     TokenUsage,
+    ToolSchema,
     ToolUseBlock,
     TransientError,
 )
@@ -103,7 +104,7 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: AnthropicConfig | None,
     ) -> AssistantResponse:
         """Execute a single completion call.
@@ -126,7 +127,7 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         cfg: AnthropicConfig,
     ) -> dict:
         """Build kwargs for `messages.create()`."""
@@ -162,9 +163,10 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
 
     @staticmethod
     def _is_turn_reminder(block: dict) -> bool:
-        # Every turn-local reminder producer (todo in core/loop.py, memory
-        # index in memory/store.py) wraps via messages.types.wrap_system_reminder,
-        # so the shared SYSTEM_REMINDER_PREFIX is the detection contract.
+        # Every turn-local reminder producer (todo list in api/prompts.py, memory
+        # index in memory/store.py, turn_sections in core/engine.py) wraps via
+        # messages.types.wrap_system_reminder, so the shared SYSTEM_REMINDER_PREFIX
+        # is the detection contract.
         return (
             block.get("type") == "text"
             and str(block.get("text", "")).startswith(SYSTEM_REMINDER_PREFIX)

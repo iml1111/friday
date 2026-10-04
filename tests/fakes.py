@@ -20,6 +20,7 @@ from typing import Union
 from friday_agent.api.provider import (
     AssistantResponse,
     LLMProvider,
+    ToolSchema,
 )
 from friday_agent.memory.store import IndexEntry, MemoryEntry, MemoryStore
 
@@ -86,14 +87,14 @@ class FakeLLMProvider(LLMProvider):
         self.call_count: int = 0
         self.received_messages: list[list[dict]] = []
         self.received_system_prompts: list[str] = []
-        self.received_tools: list[list[dict]] = []
+        self.received_tools: list[list[ToolSchema]] = []
         self.received_configs: list[FakeConfig | None] = []
 
     async def complete(
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: FakeConfig | None,
     ) -> AssistantResponse:
         """Return scripted responses in order or raise an injected error."""

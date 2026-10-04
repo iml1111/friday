@@ -12,10 +12,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import AsyncGenerator
 
-from pydantic import ValidationError
-
 from friday_agent.messages.types import ContentBlock, Message, create_tool_result_message
-from friday_agent.tools.base import Tool
+from friday_agent.tools.base import Tool, ToolResult
 
 
 @dataclass
@@ -37,31 +35,52 @@ def _find_tool(tools: list[Tool], name: str) -> Tool | None:
     return None
 
 
+def _validated_input(tool: Tool, block: ContentBlock) -> dict | None:
+    """Return the block input validated against the tool's schema, or None if it does not validate."""
+    if block.input is None:
+        return None
+    try:
+        return tool.input_schema().model_validate(block.input).model_dump()
+    except Exception:
+        return None
+
+
 def _is_concurrency_safe(tool: Tool, block: ContentBlock) -> bool:
     """Return whether a single ContentBlock is concurrency-safe.
 
-    First validates the block input against the tool's schema. If validation
-    fails (including None input), returns False immediately (conservative
-    fallback). On success, delegates to ``tool.is_concurrency_safe``.
+    Validates the block input against the tool's schema first; None or invalid
+    input returns False (conservative fallback). On success, delegates to
+    ``tool.is_concurrency_safe``; a raising predicate also counts as False.
     """
-    raw_input = block.input
-
-    # Attempt schema validation; None input cannot be validated.
-    try:
-        schema_model = tool.input_schema()
-        if raw_input is None:
-            # None is unparseable — conservatively treat as non-safe.
-            return False
-        parsed = schema_model.model_validate(raw_input)
-    except (ValidationError, Exception):
-        # Parse failure → conservative fallback.
+    parsed = _validated_input(tool, block)
+    if parsed is None:
         return False
-
-    # Parsed successfully; delegate to the tool's own predicate.
     try:
-        return bool(tool.is_concurrency_safe(parsed.model_dump()))
+        return bool(tool.is_concurrency_safe(parsed))
     except Exception:
         return False
+
+
+def is_deferred_call(block: ContentBlock, tools: list[Tool]) -> bool:
+    """Return whether a tool_use block is held back for an external result.
+
+    An unknown tool and input that fails schema validation count as not
+    deferred: such a call runs inline — call() receives the raw input, and its
+    own validation turns it into an immediate error for the model — instead of
+    an external executor receiving a malformed call. A predicate that raises on
+    valid input counts as deferred: a gate fails closed, so a well-formed call
+    waits for its external result rather than running unchecked.
+    """
+    tool = _find_tool(tools, block.name or "")
+    if tool is None:
+        return False
+    parsed = _validated_input(tool, block)
+    if parsed is None:
+        return False
+    try:
+        return bool(tool.is_deferred(parsed))
+    except Exception:
+        return True  # fail closed: hold the call rather than run it past a broken gate
 
 
 def partition_tool_calls(
@@ -103,6 +122,20 @@ def partition_tool_calls(
     return batches
 
 
+def to_tool_result_message(tool_use_id: str, result: ToolResult) -> Message:
+    """Convert a ToolResult into its tool_result message (data, error flag, image).
+
+    The single conversion shared by run_tools and core.loop.resume(), so results
+    produced inside step() and results attached later behave identically.
+    """
+    return create_tool_result_message(
+        tool_use_id=tool_use_id,
+        result_text=str(result.data),
+        is_error=result.is_error,
+        image=result.image,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Single-tool execution helper
 # ---------------------------------------------------------------------------
@@ -124,11 +157,7 @@ async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> tuple[Mess
 
     try:
         result = await tool.call(block.input or {})
-        return create_tool_result_message(
-            tool_use_id=block.id or "",
-            result_text=str(result.data),
-            is_error=result.is_error,
-        ), result.state_effect
+        return to_tool_result_message(block.id or "", result), result.state_effect
     except Exception as exc:
         return create_tool_result_message(
             tool_use_id=block.id or "",

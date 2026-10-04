@@ -19,7 +19,7 @@ Core contract:
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `Batch` |
+| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `to_tool_result_message()`, `is_deferred_call()`, `Batch` |
 | `friday_agent/tools/base.py` | Tool interface · result type | `Tool`, `ToolResult` |
 | `friday_agent/tools/builtin/example_tool.py` | Demo tool (authoring pattern) | `ExampleTool` |
 
@@ -29,7 +29,7 @@ Core contract:
 
 ### Partitioning (`partition_tool_calls`)
 
-`orchestrator.py:67` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
+`orchestrator.py:86` — takes `blocks: list[ContentBlock]` and returns `list[Batch]`.
 
 ```
 [RO, RO, RO, MUT, RO, RO]
@@ -41,19 +41,21 @@ Core contract:
 
 **Merge rule**: consecutive concurrency-safe blocks are merged into one parallel batch. A non-safe block always becomes its own batch.
 
-**Conservative fallback** (`orchestrator.py:40–64`): treated as non-safe if any of the following applies.
+**Conservative fallback** (`orchestrator.py:38–61`): treated as non-safe if any of the following applies.
 - Tool not found (unknown tool)
 - Input is `None`
 - Pydantic schema validation fails
 - `is_concurrency_safe()` itself raises an exception
 
-**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:40–64`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:62`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
+**concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:48–61`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:59`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
+
+**Deferred calls**: before partitioning, `run_one_turn` holds back every call for which `is_deferred_call()` is true — the tool's `is_deferred(input)` after schema validation. An unknown tool or `None`/invalid input → not deferred: the call runs inline, and `call()` — which receives the raw input and must validate it — turns it into an immediate error for the model. A predicate that raises on valid input → deferred, so a broken gate fails closed instead of running the call unchecked. Only the remaining calls are partitioned and run; the deferred ones end the turn as `Suspended` ([01-core-loop](01-core-loop.md)).
 
 ---
 
 ### Execution Path — `run_tools`
 
-`orchestrator.py:144` / `core/loop.py:40,261` — the only execution path that `run_one_turn()` calls directly.
+`orchestrator.py:173` / `core/loop.py:29,148` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
 # core/loop.py
@@ -87,7 +89,7 @@ run_one_turn()
             ├─ parallel Batch: asyncio.gather + Semaphore → yield in block order
             └─ sequential Batch: yield blocks one at a time, in order
                     │
-                    each block → _run_single_tool() → tool_result Message
+                    each block → _run_single_tool() → to_tool_result_message() → tool_result Message
                                      └─ on error: error tool_result (batch not aborted)
 ```
 
@@ -125,39 +127,43 @@ class WeatherTool(Tool):
         return ToolResult(data=f"{parsed.city}: sunny, 22°C")
 ```
 
-To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:40–64`) consults only this single predicate.
+To be eligible for a parallel batch, `is_concurrency_safe()` just needs to return `True` — partitioning (`_is_concurrency_safe`, `orchestrator.py:48–61`) consults only this single predicate.
 
 ---
 
 ### `Tool` Methods — Conservative Defaults
 
-`tools/base.py:139`
+`tools/base.py:142`
 
 | Method | Return Type | Default | Description |
 |---|---|---|---|
 | `input_schema()` | `type[BaseModel]` | _(abstract)_ | Input schema. **Must implement** |
 | `call(args)` | `ToolResult` | _(abstract)_ | Execution logic. **Must implement** |
 | `is_concurrency_safe(input)` | `bool` | `False` | Whether parallel execution is allowed |
+| `is_deferred(input)` | `bool` | `False` | Whether the call's result arrives later, outside `step()` (the turn ends with `Suspended`) |
 
 ---
 
 ### `ToolResult`
 
-`tools/base.py:17`
+`tools/base.py:19`
 
 ```python
 ToolResult(
     data,                   # execution result (string or structured data)
     is_error=False,
     state_effect=None,      # declarative state mutation (e.g. {"todos": [...]}); applied solely by the loop
+    image=None,             # {"media_type": "image/png", "data": "<base64>"} — sent as an image block next to the text
 )
 ```
 
+`to_tool_result_message(tool_use_id, result)` is the single `ToolResult` → `tool_result` message conversion (data → text, `is_error` → `<tool_use_error>` wrapping, `image` → block array). It is shared by `run_tools` and `resume()`.
+
 ---
 
-### `get_tool_schema()`
+### `get_tool_schema() -> ToolSchema`
 
-`tools/base.py` — runs the Pydantic v2 schema through the wire-diet pipeline and returns it in the form passed to the API. Since the schema resides in the prefix of every call, bytes carrying zero information for the model are removed (validation is done by the Pydantic model — this schema is purely "documentation shown to the model", so semantics are unchanged):
+`tools/base.py` — runs the Pydantic v2 schema through the wire-diet pipeline and returns it in the form passed to the API, typed as `ToolSchema` (a `TypedDict` in `api/provider.py` — a plain dict at runtime). Since the schema resides in the prefix of every call, bytes carrying zero information for the model are removed (validation is done by the Pydantic model — this schema is purely "documentation shown to the model", so semantics are unchanged):
 
 1. **`_inline_defs`** — inlines and removes `$defs`. Ensures nested models · enums (e.g. `TodoItem.status`) are exposed to the model as-is without dangling `$ref`s — otherwise only `$ref` remains and the model cannot see the enum constraint.
 2. **`_strip_titles`** — recursively removes pydantic's auto-generated cosmetic `title` (pure duplication, since the property name is already in the schema). Actual properties named `title` (dict values) are preserved.
@@ -180,7 +186,7 @@ ToolResult(
 |---|---|---|
 | Uses | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | Uses | `pydantic` | Input schema validation (`model_validate`, `model_json_schema`) |
-| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:40,261`) |
+| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:29,148`) |
 
 ---
 
@@ -188,10 +194,12 @@ ToolResult(
 
 **Result order invariant** — even with parallel execution, `run_tools` returns results **in tool_use block input order** (see [06-invariants](06-invariants.md)). `asyncio.gather` guarantees argument order, so adding reordering code is prohibited.
 
-**Backfill of incomplete tool_use** — on error paths, the tool_result corresponding to some tool_use blocks may be missing. Backfill in this case is **handled by `yield_missing_tool_result_blocks()` in `core/loop.py`**. The orchestrator does not bear this responsibility.
+**Pairing on error paths** — `run_tools()` emits exactly one `tool_result` per executed `tool_use`: unknown tools and exceptions become error results, never a gap. The loop's only error path (`LLMError` from the provider call) fires before an assistant message exists, so no `tool_use` is ever left without its `tool_result` (see [06-invariants](06-invariants.md)).
 
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.
+
+**`is_deferred` defaults** — `False` unless overridden; a predicate that raises on valid input counts as deferred (fail closed). A deferred tool's `call()` still runs for every call that is not deferred — including input that fails validation, which it receives raw — so validate `args` in `call()` (e.g. `Input(**args)`): the exception becomes an error result for the model, while valid non-deferred calls do the real work.
 
 **Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names. In addition, when a store is mounted via `memory=` (opt-in), that `MemoryStore`'s `tools()` (default `memory_save`/`memory_read`/`memory_delete`) are also registered, and if a caller tool's name clashes with a built-in or memory tool name, `__init__` rejects it with `ValueError` (uniqueness check across all tool names).
 

@@ -1,20 +1,21 @@
-"""Tests for friday_agent/context/compact.py — conversation compaction."""
+"""Tests for compaction — the prompt texts (api/prompts.py) and what engine.compact() sends and builds."""
 import pytest
 
+from friday_agent.api.prompts import format_compact_prompt
 from friday_agent.api.provider import (
     AssistantResponse,
+    LLMError,
     StopReason,
     TextBlock,
+    ThinkingBlock,
     TokenUsage,
 )
-from friday_agent.context.compact import (
-    COMPACT_PROMPT,
-    SUMMARIZER_SYSTEM_PROMPT,
-    build_compact_prompt,
-    compact_conversation,
-    create_compact_summary_message,
-)
+from friday_agent.core.engine import FridayAgent
+from friday_agent.core.state import LoopState
+from friday_agent.messages.types import Message, create_user_message
 from tests.fakes import FakeLLMProvider
+
+BASE_PROMPT = format_compact_prompt()
 
 
 def _summary_response(text: str = "<summary>s</summary>") -> AssistantResponse:
@@ -25,118 +26,61 @@ def _summary_response(text: str = "<summary>s</summary>") -> AssistantResponse:
     )
 
 
+async def _compact(provider: FakeLLMProvider, compact_instructions: str = "") -> Message:
+    """Run engine.compact() over a one-message state; return the summary message."""
+    engine = FridayAgent(provider=provider, tools=[], compact_instructions=compact_instructions)
+    state = await engine.compact(LoopState(messages=[create_user_message("x")]))
+    return state.messages[0]
+
+
+async def _sent_prompt(compact_instructions: str) -> str:
+    provider = FakeLLMProvider(responses=[_summary_response()])
+    await _compact(provider, compact_instructions)
+    return provider.received_messages[0][-1]["content"]
+
+
 # ---------------------------------------------------------------------------
-# compact_conversation: produces summary via LLMProvider.complete()
+# Compaction prompt text
 # ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_compact_conversation_extracts_summary_tag():
-    """compact_conversation calls provider.complete() and extracts the <summary> tag."""
-    summary_text = "COMPACTED"
-    response = AssistantResponse(
-        content=[TextBlock(type="text", text=f"<analysis>scratch</analysis><summary>{summary_text}</summary>")],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(input_tokens=100, output_tokens=50),
-    )
-    provider = FakeLLMProvider(responses=[response])
-
-    messages = [{"role": "user", "content": "hello"}]
-    result = await compact_conversation(provider=provider, messages=messages)
-
-    assert result == summary_text
-    # provider.complete() must have been called exactly once
-    assert provider.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_compact_conversation_uses_no_tools():
-    """compact_conversation must call complete() with an empty tools list."""
-    response = AssistantResponse(
-        content=[TextBlock(type="text", text="<summary>short</summary>")],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(input_tokens=10, output_tokens=5),
-    )
-    provider = FakeLLMProvider(responses=[response])
-
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
-
-    assert provider.received_tools[0] == [], "compact must send empty tools list"
-
-
-@pytest.mark.asyncio
-async def test_compact_conversation_no_summary_tag_returns_raw():
-    """If the response has no <summary> tag, return the full text (graceful fallback)."""
-    raw_text = "No tags here, just plain text."
-    response = AssistantResponse(
-        content=[TextBlock(type="text", text=raw_text)],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(input_tokens=10, output_tokens=5),
-    )
-    provider = FakeLLMProvider(responses=[response])
-
-    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
-    assert result == raw_text
-
 
 def test_compact_prompt_has_enriched_structure():
-    """Enriched COMPACT_PROMPT carries strong no-tools framing, analysis instruction,
+    """The compaction prompt carries strong no-tools framing, analysis instruction,
     all 9 sections, and the <analysis>/<summary> format — generalized (no dev-only phrasing)."""
-    assert "Do NOT call any tools" in COMPACT_PROMPT
-    assert "<analysis>" in COMPACT_PROMPT and "<summary>" in COMPACT_PROMPT
+    assert "Do NOT call any tools" in BASE_PROMPT
+    assert "<analysis>" in BASE_PROMPT and "<summary>" in BASE_PROMPT
     for n in range(1, 10):
-        assert f"{n}." in COMPACT_PROMPT, f"section {n} missing"
-    assert "Primary Request and Intent" in COMPACT_PROMPT
-    assert "All user messages" in COMPACT_PROMPT
-    assert "Optional Next Step" in COMPACT_PROMPT
+        assert f"{n}." in BASE_PROMPT, f"section {n} missing"
+    assert "Primary Request and Intent" in BASE_PROMPT
+    assert "All user messages" in BASE_PROMPT
+    assert "Optional Next Step" in BASE_PROMPT
     # Domain-agnostic: dev-only phrasing must not creep back in
-    assert "function signatures" not in COMPACT_PROMPT
+    assert "function signatures" not in BASE_PROMPT
 
 
 def test_no_tools_guard_appears_exactly_once():
-    """compact_conversation sends tools=[] and both adapters drop the field entirely,
-    so the model cannot emit tool_use at all. One mention is belt-and-suspenders for
-    third-party providers that ignore the argument; repeating it is dead weight."""
-    assert COMPACT_PROMPT.count("Do NOT call any tools") == 1
+    """One no-tools request is enough: a reply that calls a tool anyway is retried
+    with tools=[], where both adapters drop the field and tool_use is impossible.
+    Repeating the guard is dead weight."""
+    assert BASE_PROMPT.count("Do NOT call any tools") == 1
     # The trailing reminder guards the OUTPUT FORMAT, not tool use.
-    assert COMPACT_PROMPT.rstrip().endswith(
+    assert BASE_PROMPT.rstrip().endswith(
         "REMINDER: Respond with plain text only — an <analysis> block followed by a <summary> block."
     )
 
 
-def test_create_compact_summary_message_has_continuation_framing():
-    """The summary message wraps the summary with continuation + resume-directly framing."""
-    msg = create_compact_summary_message("THE-SUMMARY-BODY")
-    text = " ".join(b.text or "" for b in msg.content if b.text)
-    assert msg.is_compact_summary is True
-    assert "THE-SUMMARY-BODY" in text
-    assert "continued from a previous conversation" in text
-    assert "without asking the user any further questions" in text
+# ---------------------------------------------------------------------------
+# engine.compact(): compact_instructions slot
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+async def test_blank_instructions_send_the_base_prompt(blank):
+    """No injection (or whitespace only) sends the base prompt unchanged."""
+    assert await _sent_prompt(blank) == BASE_PROMPT
 
 
 @pytest.mark.asyncio
-async def test_compact_conversation_uses_dedicated_summarizer_system():
-    """With no system_prompt override, the summary call uses SUMMARIZER_SYSTEM_PROMPT."""
-    response = AssistantResponse(
-        content=[TextBlock(type="text", text="<summary>s</summary>")],
-        stop_reason=StopReason.END_TURN,
-        usage=TokenUsage(input_tokens=1, output_tokens=1),
-    )
-    provider = FakeLLMProvider(responses=[response])
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
-    assert provider.received_system_prompts[0] == SUMMARIZER_SYSTEM_PROMPT
-
-
-# ---------------------------------------------------------------------------
-# build_compact_prompt: optional domain-instruction slot
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
-def test_build_compact_prompt_blank_is_byte_identical_to_base(blank):
-    """No injection (or whitespace only) must render the base prompt unchanged."""
-    assert build_compact_prompt(blank) == COMPACT_PROMPT
-
-
-def test_build_compact_prompt_places_extra_between_sections_and_output_format():
+async def test_instructions_land_between_sections_and_output_format():
     """The domain block lands after section 9 and before the output format + REMINDER.
 
     Order matters: the trailing REMINDER carries the <analysis>/<summary> output
@@ -144,7 +88,7 @@ def test_build_compact_prompt_places_extra_between_sections_and_output_format():
     tags degrades to raw-text extraction, so an injected block must never displace
     the reminder from the end of the prompt.
     """
-    prompt = build_compact_prompt("Always preserve the candidate shortlist.")
+    prompt = await _sent_prompt("Always preserve the candidate shortlist.")
 
     section_9 = prompt.index("9. Optional Next Step")
     extra = prompt.index("Always preserve the candidate shortlist.")
@@ -157,37 +101,95 @@ def test_build_compact_prompt_places_extra_between_sections_and_output_format():
     assert "take precedence over the generic sections above" in prompt
 
 
-def test_build_compact_prompt_keeps_base_prompt_intact():
+@pytest.mark.asyncio
+async def test_instructions_keep_the_base_prompt_intact():
     """Injection is additive — every base guarantee survives."""
-    prompt = build_compact_prompt("domain rules")
-    assert COMPACT_PROMPT != prompt
+    prompt = await _sent_prompt("domain rules")
+    assert prompt != BASE_PROMPT
     for n in range(1, 10):
         assert f"{n}." in prompt
     assert "Do NOT call any tools" in prompt
     assert "<analysis>" in prompt and "<summary>" in prompt
 
 
-@pytest.mark.asyncio
-async def test_compact_conversation_sends_extra_instructions():
-    """extra_instructions reaches the final user message of the summary call."""
-    provider = FakeLLMProvider(responses=[_summary_response()])
-
-    await compact_conversation(
-        provider=provider,
-        messages=[{"role": "user", "content": "x"}],
-        extra_instructions="Preserve every sourcing filter verbatim.",
-    )
-
-    final_message = provider.received_messages[0][-1]
-    assert final_message["role"] == "user"
-    assert "Preserve every sourcing filter verbatim." in final_message["content"]
-
+# ---------------------------------------------------------------------------
+# engine.compact(): summary message
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_compact_conversation_defaults_to_base_prompt():
-    """Omitting extra_instructions sends the untouched base prompt."""
-    provider = FakeLLMProvider(responses=[_summary_response()])
+async def test_summary_message_has_continuation_framing():
+    """The summary message wraps the summary with continuation + resume-directly framing."""
+    msg = await _compact(FakeLLMProvider(responses=[_summary_response("<summary>THE-SUMMARY-BODY</summary>")]))
+    text = msg.content[0].text
+    assert msg.type == "user"
+    assert msg.is_compact_summary is True
+    assert "THE-SUMMARY-BODY" in text
+    assert "continued from a previous conversation" in text
+    assert "without asking the user any further questions" in text
 
-    await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
 
-    assert provider.received_messages[0][-1]["content"] == COMPACT_PROMPT
+# ---------------------------------------------------------------------------
+# engine.compact(): <summary> extraction
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_compact_extracts_summary_tag():
+    """The <analysis> block is discarded; only the <summary> body is kept."""
+    provider = FakeLLMProvider(responses=[_summary_response("<analysis>scratch</analysis><summary>COMPACTED</summary>")])
+
+    text = (await _compact(provider)).content[0].text
+
+    assert "COMPACTED" in text
+    assert "scratch" not in text
+    assert provider.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_compact_ignores_stray_closing_tag_before_summary():
+    """An <analysis> block closed with </summary> must not empty the summary."""
+    raw = "<analysis>notes</summary>\n<summary>REAL BODY</summary>"
+    provider = FakeLLMProvider(responses=[_summary_response(raw)])
+
+    text = (await _compact(provider)).content[0].text
+
+    assert "REAL BODY" in text
+    assert "notes" not in text
+
+
+@pytest.mark.asyncio
+async def test_compact_empty_summary_falls_back_to_full_text():
+    """An empty body is a miss: one no-tools retry, then the full text."""
+    raw = "<analysis>notes</analysis><summary>  </summary>"
+    provider = FakeLLMProvider(responses=[_summary_response(raw), _summary_response(raw)])
+
+    text = (await _compact(provider)).content[0].text
+
+    assert raw in text
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [[], [TextBlock(text="  \n")], [ThinkingBlock(thinking="planning the summary")]],
+    ids=["empty", "whitespace", "thinking-only"],
+)
+async def test_compact_raises_when_the_reply_has_no_text(content):
+    """A reply with no text, even after the no-tools retry, must not replace the
+    history with an empty summary: compact() raises so the caller keeps its state."""
+    reply = AssistantResponse(content=content, stop_reason=StopReason.END_TURN, usage=TokenUsage())
+    provider = FakeLLMProvider(responses=[reply, reply])
+
+    with pytest.raises(LLMError, match="no text"):
+        await _compact(provider)
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_compact_unclosed_summary_falls_back_to_full_text():
+    raw = "<analysis>notes</analysis><summary>cut off mid-sentence"
+    provider = FakeLLMProvider(responses=[_summary_response(raw), _summary_response(raw)])
+
+    text = (await _compact(provider)).content[0].text
+
+    assert raw in text

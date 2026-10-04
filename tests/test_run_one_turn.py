@@ -1,7 +1,6 @@
 """core/loop.py run_one_turn() — unit tests for the single-turn step function."""
 import pytest
 
-from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE
 from friday_agent.api.provider import (
     AssistantResponse, StopReason, TextBlock, ToolUseBlock, TokenUsage,
 )
@@ -62,21 +61,19 @@ async def test_run_one_turn_tool_use_yields_loopstate():
 
 
 @pytest.mark.asyncio
-async def test_run_one_turn_injects_general_guidance():
-    """run_one_turn prepends GENERAL_AGENT_GUIDANCE before the caller's system
-    prompt (generic -> specific: domain rules win by recency)."""
+async def test_run_one_turn_sends_system_prompt_verbatim():
+    """run_one_turn sends the prompt it is given as-is — assembly is the
+    engine's job (assemble_system_prompt, once per FridayAgent)."""
     end = AssistantResponse(content=[TextBlock(text="ok")], stop_reason=StopReason.END_TURN, usage=TokenUsage())
     provider = FakeLLMProvider(responses=[end])
     state = LoopState(messages=[create_user_message("hi")])
     agen = run_one_turn(
         provider=provider, tools=[], tool_schemas=[], state=state,
-        system_prompt="You are a research assistant.",
+        system_prompt="FULL SYSTEM PROMPT",
         config=None, max_concurrency=10,
     )
     await _drain(agen)
 
-    sent = provider.received_system_prompts[0]
-    assert sent.endswith("You are a research assistant.")
-    assert GENERAL_AGENT_GUIDANCE in sent
+    assert provider.received_system_prompts[0] == "FULL SYSTEM PROMPT"
 
 

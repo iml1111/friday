@@ -8,6 +8,12 @@ AnthropicProvider._apply_cache_control:
   * Turn 1 (cold): cache_creation_input_tokens > 0, cache_read_input_tokens == 0
   * Turn 2 (warm): cache_read_input_tokens > 0  (the prefix written on turn 1
     is read back at ~0.1x instead of reprocessed at 1x)
+  * Both turns carry a per-turn section (turn_sections) that changes every
+    call — it rides messages[-1] as a <system-reminder>, so turn 2 must still
+    read the cache.
+  * Compaction (the call after turn 2): cache_read_input_tokens > 0 — the
+    summary call shares step()'s prefix, so it reads the history the agent
+    turns cached instead of writing it again.
 
 A per-run nonce embedded in the system prompt makes turn 1 cold even on rapid
 re-runs (defeats the 5-minute server TTL left by a previous run), while both
@@ -16,13 +22,14 @@ turns share the identical prompt so turn 2 hits.
 Usage:
     LLM_MODEL=claude-haiku-4-5 python scripts/verify/verify_cache.py
 
-Cost guardrail: max_tokens=256; exactly two completion calls; ~12K-token prefix.
+Cost guardrail: max_tokens=256 for turns (the summary call raises it to the summary budget); three or four completion calls over a ~12K-token prefix.
 Anthropic-only — it verifies the explicit cache_control breakpoints. For gpt-*
 models caching is automatic (no _apply_cache_control), so the script declines.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -41,6 +48,14 @@ from friday_agent.tools.builtin.example_tool import ExampleTool
 # A unique nonce per run guarantees turn 1 cannot hit a cache a previous run
 # left behind; the SAME nonce is reused on both turns so turn 2 still matches.
 _RUN_NONCE = uuid.uuid4().hex
+
+_TICKS = {"n": 0}
+
+
+def _ticker() -> str:
+    """A per-turn section that differs on every call (it must not break the cache)."""
+    _TICKS["n"] += 1
+    return f"Per-turn note {_TICKS['n']}"
 
 # Static filler that pushes the cacheable prefix above the per-model minimum
 # (Opus/Haiku 4.x = 4096 tokens, Sonnet 4.6 = 2048) so the breakpoint engages.
@@ -66,8 +81,10 @@ class _RecordingProvider(LLMProvider):
         self._inner = inner
         self.config_type = inner.config_type  # mirror so FridayAgent validation passes
         self.calls: list[TokenUsage] = []
+        self.messages: list[list[dict]] = []
 
     async def complete(self, messages, system_prompt, tools, config) -> AssistantResponse:
+        self.messages.append(messages)
         resp = await self._inner.complete(messages, system_prompt, tools, config)
         self.calls.append(resp.usage)
         return resp
@@ -77,7 +94,7 @@ async def _run_turn(engine: FridayAgent, state: LoopState):
     """Drive one engine.step() to its sentinel; return (sentinel, [messages])."""
     collected: list[Message] = []
     outcome: LoopState | Terminal | None = None
-    async for item in engine.step(state):
+    async for item in engine.step(state, turn_sections=[_ticker()]):
         if isinstance(item, (LoopState, Terminal)):
             outcome = item
         else:
@@ -159,6 +176,12 @@ async def main() -> int:
     outcome2, collected2 = await _run_turn(engine, state2)
     _diag_turn(2, outcome2, collected2)
 
+    # Compaction over the same history: the summary call shares step()'s prefix,
+    # so it must read the cache the turns wrote.
+    state3 = outcome2.state if isinstance(outcome2, Terminal) else outcome2
+    compact_at = len(recorder.calls)
+    await engine.compact(state3)
+
     thinking_seen = any(
         b.type == "thinking"
         for msgs in (collected1, collected2) for m in msgs for b in m.content
@@ -182,6 +205,11 @@ async def main() -> int:
         "turn 2 read cache (cache_read > 0)": c2.cache_read_input_tokens > 0,
         "turn 2 read ~= turn 1 prefix (read >= 50% of turn-1 write)":
             c2.cache_read_input_tokens >= 0.5 * max(c1.cache_creation_input_tokens, 1),
+        "turn sections rode both turns (per-turn note 1 and 2 sent)":
+            "Per-turn note 1" in json.dumps(recorder.messages[0])
+            and "Per-turn note 2" in json.dumps(recorder.messages[1]),
+        "compaction read cache (cache_read > 0)":
+            recorder.calls[compact_at].cache_read_input_tokens > 0,
     }
 
     print("\n--- Checklist ---")
@@ -197,6 +225,8 @@ async def main() -> int:
     saved = c2.cache_read_input_tokens
     print(f"\n  turn-2 cached-read tokens: {saved:,} "
           f"(billed ~0.1x vs 1x -> ~{saved * 0.9:,.0f} tokens' worth saved this turn)")
+
+    print(f"  compaction: {_fmt(recorder.calls[compact_at])}")
 
     print("\n" + ("=" * 28 + " PASS " + "=" * 28 if all_pass
                   else "=" * 28 + " FAIL " + "=" * 28))

@@ -30,7 +30,7 @@ A single flat dataclass that represents every block kind with one type.
 | `name` | `str \| None` | `tool_use` | Tool name |
 | `input` | `dict \| None` | `tool_use` | Tool arguments (the Anthropic SDK passes them already parsed into a dict) |
 | `tool_use_id` | `str \| None` | `tool_result` | ID of the corresponding tool_use |
-| `content` | `str \| None` | `tool_result` | Tool execution result text |
+| `content` | `str \| list[dict] \| None` | `tool_result` | Tool result text — or a `[text, image]` block array when the tool returned an image |
 | `is_error` | `bool` | `tool_result` | Whether execution errored (default `False`) |
 
 > **⚠️ Name collision warning**: `ContentBlock` in `messages/types.py` (single flat dataclass, defined above) and `ContentBlock` in `api/provider.py:34` (`Union[TextBlock, ToolUseBlock, ThinkingBlock]` alias) **share only the name and are completely separate types**. The former is a dataclass for internal representation; the latter is a Union alias of Anthropic SDK types. Watch for the collision when importing both files in the same scope.
@@ -76,12 +76,14 @@ def create_tool_result_message(
     tool_use_id: str,
     result_text: str,
     is_error: bool = False,
+    image: dict | None = None,
 ) -> Message:
 ```
 
 - Fixed to `type="user"`, `role="user"` (complies with the API role alternation rule).
 - If `is_error=True`, `content` is wrapped as `<tool_use_error>result_text</tool_use_error>`.
 - The `is_error` value is passed through to `ContentBlock.is_error` as-is.
+- If `image` is given (`{"media_type", "data"}`, base64), `content` becomes `[{"type": "text", "text": ...}, {"type": "image", "source": {"type": "base64", ...}}]`; otherwise the string, exactly as before.
 
 ---
 
@@ -93,11 +95,11 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
 
 Converts the internal `Message` list into the `{"role": str, "content": list[dict]}` format the LLM API accepts.
 
-**3-stage filter** (applied in order):
+**Filters** (applied in order):
 
 1. Exclude `is_meta=True` messages — synthetic messages internal to the loop are not sent to the API.
 2. Exclude messages with an empty `role` — system-internal messages have no wire role.
-3. Exclude messages with empty `content` — the API rejects empty content.
+3. Exclude messages left with no content after block conversion (an empty `content`, or only blocks that convert to nothing) — the API rejects empty content.
 
 **Block conversion rules** (`_convert_content_blocks()`):
 
@@ -105,7 +107,7 @@ Converts the internal `Message` list into the `{"role": str, "content": list[dic
 |---|---|
 | `text` | `{"type":"text", "text":...}` (omitted if `text` is `None`) |
 | `tool_use` | `{"type":"tool_use", "id":..., "name":..., "input":...}` |
-| `tool_result` | `{"type":"tool_result", "tool_use_id":..., "content":...}` (adds `"is_error":True` if is_error=True) |
+| `tool_result` | `{"type":"tool_result", "tool_use_id":..., "content":...}` (content passed as-is — string or block array; adds `"is_error":True` if is_error=True) |
 | `thinking` | `{"type":"thinking", "thinking":...}` (echoes the `text` field under the `thinking` key) |
 
 > **Verbatim echo of thinking blocks**: thinking blocks must be returned to the API as-is, without omission. If even one intermediate thinking block is missing, the API rejects that turn's conversation structure. This rule is also stated separately in [06-invariants](06-invariants.md).
@@ -114,15 +116,15 @@ Converts the internal `Message` list into the `{"role": str, "content": list[dic
 
 ## ④ Public API
 
-The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and compactor (`context/compact.py`) directly import and use the first 3 symbols; the 2 turn-local reminder protocol symbols are shared by the reminder producers (`core/loop.py`·`memory/store.py`) and the detector (`api/anthropic_provider.py`).
+The loop (`core/loop.py`), orchestrator (`tools/orchestrator.py`), and engine (`core/engine.py`, for the compaction summary) directly import and use the first 3 symbols; the 2 turn-local reminder protocol symbols are shared by the reminder producers (`core/loop.py`·`memory/store.py`) and the detector (`api/anthropic_provider.py`).
 
 | Symbol | Location | Role |
 |---|---|---|
 | `create_user_message()` | `messages/types.py:81` | Create user input · meta messages |
 | `create_tool_result_message()` | `messages/types.py:98` | Create tool result messages |
 | `normalize_for_api()` | `messages/normalize.py:6` | Conversion just before API transmission |
-| `wrap_system_reminder()` | `messages/types.py:124` | Wrap turn-local reminders in `<system-reminder>` (shared by all producers) |
-| `SYSTEM_REMINDER_PREFIX` | `messages/types.py:121` | Detection contract for the Anthropic adapter's cache breakpoint skip |
+| `wrap_system_reminder()` | `messages/types.py:136` | Wrap turn-local reminders in `<system-reminder>` (shared by all producers) |
+| `SYSTEM_REMINDER_PREFIX` | `messages/types.py:133` | Detection contract for the Anthropic adapter's cache breakpoint skip |
 
 ---
 
@@ -133,12 +135,11 @@ Conversely, the subsystems below depend on this package:
 
 | Dependency Module | Symbols Used |
 |---|---|
-| `friday_agent/core/loop.py` | `normalize_for_api()`, `create_tool_result_message()` |
-| `friday_agent/core/engine.py` | `normalize_for_api()` |
+| `friday_agent/core/loop.py` | `normalize_for_api()` |
+| `friday_agent/core/engine.py` | `normalize_for_api()`, `create_user_message()` (the compaction summary message) |
 | `friday_agent/tools/orchestrator.py` | `create_tool_result_message()` |
-| `friday_agent/context/compact.py` | `create_user_message()` (inside `create_compact_summary_message()`) |
 
-> `create_user_message()` is used only in `context/compact.py`.
+> Inside the library, `create_user_message()` is used only by `engine.compact()`.
 
 ---
 
@@ -146,7 +147,7 @@ Conversely, the subsystems below depend on this package:
 
 - **Role alternation rule**: `tool_result` messages must have `role="user"`, and the first message of the conversation must also be user. `create_tool_result_message()` enforces this. On violation, the API rejects the request. See [06-invariants](06-invariants.md) for the detailed rules.
 - **Verbatim thinking echo**: the `thinking` block conversion in `normalize_for_api()` must never be omitted or altered. If missing, the API turn breaks ([06-invariants](06-invariants.md)).
-- **tool_result `<tool_use_error>` wrapping**: `create_tool_result_message(is_error=True)` wraps the `content` text in `<tool_use_error>...</tool_use_error>` (`messages/types.py:109`). This is a convention that lets the LLM recognize the error context, so do not change the tag arbitrarily.
+- **tool_result `<tool_use_error>` wrapping**: `create_tool_result_message(is_error=True)` wraps the `content` text in `<tool_use_error>...</tool_use_error>` (`messages/types.py:110`). This is a convention that lets the LLM recognize the error context, so do not change the tag arbitrarily.
 - **Single definition of the `<system-reminder>` tag**: the turn-local reminder tag is defined in exactly one place — `wrap_system_reminder()`/`SYSTEM_REMINDER_PREFIX` in `messages/types.py`. The producers (todo · memory index) and the Anthropic adapter's breakpoint-skip detection share this constant, so re-duplicating the literal silently breaks the cache skip.
 - **Do not abuse the `is_meta` flag**: `is_meta=True` messages are transparently removed in `normalize_for_api()`. Using it for anything other than loop-internal synthetic messages can drop messages that should reach the API.
 - **Name collision**: importing `ContentBlock` from `messages/types.py` and `ContentBlock` (Union alias) from `api/provider.py` in the same file causes a name collision. Disambiguate with an `as` alias when needed.

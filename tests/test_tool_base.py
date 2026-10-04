@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from friday_agent.api.provider import ToolSchema
 from friday_agent.tools.base import Tool, ToolResult
 
 
@@ -25,8 +26,10 @@ def test_conservative_defaults():
 
 
 def test_tool_schema_shape():
+    """The runtime dict carries exactly the keys ToolSchema declares — the type
+    and what get_tool_schema() builds cannot drift apart."""
     schema = _T().get_tool_schema()
-    assert set(schema) >= {"name", "description", "input_schema"}
+    assert set(schema) == ToolSchema.__required_keys__ == {"name", "description", "input_schema"}
     assert schema["name"] == "T"
 
 

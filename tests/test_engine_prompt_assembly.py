@@ -1,16 +1,18 @@
 """FridayAgent.step() prompt assembly — cache-invariant guards.
 
-Pins the static/dynamic split at the engine boundary: the system prefix step()
-assembles is exactly MEMORY_INSTRUCTIONS + system_prompt (byte-stable within a
-session), and the live memory index travels only via run_one_turn's
-turn_reminders (messages[-1], non-persistent) — never the system prompt, where
-a save would invalidate the whole conversation cache.
+Pins the static/dynamic split at the engine boundary: the system prompt step()
+hands run_one_turn is the fully assembled one (guidance -> MEMORY_INSTRUCTIONS
+-> system_prompt, byte-stable within a session), and the live memory index
+travels only via run_one_turn's turn_reminders (messages[-1], non-persistent) —
+never the system prompt, where a save would invalidate the whole conversation
+cache.
 
 Capture point: engine.run_one_turn stubbed; forwarded kwargs recorded.
 """
 import pytest
 
 from friday_agent.api.configs import AnthropicConfig
+from friday_agent.api.prompts import GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE
 from friday_agent.api.provider import LLMProvider
 from friday_agent.core.state import LoopState
 from friday_agent.memory.store import MEMORY_INSTRUCTIONS, MemoryEntry, MemoryType
@@ -45,7 +47,7 @@ async def _capture_run_one_turn_kwargs(agent: FridayAgent, monkeypatch) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_effective_prompt_is_instructions_then_domain_even_with_entries(monkeypatch):
+async def test_prompt_is_fully_assembled_and_excludes_index_entries(monkeypatch):
     # Exact equality with a stocked store: proves the assembly shape AND that
     # the index never leaks into the system prefix.
     store = InMemoryStore()
@@ -54,16 +56,18 @@ async def test_effective_prompt_is_instructions_then_domain_even_with_entries(mo
 
     captured = await _capture_run_one_turn_kwargs(agent, monkeypatch)
 
-    assert captured["system_prompt"] == f"{MEMORY_INSTRUCTIONS}\n\nSYS-PROMPT"
+    assert captured["system_prompt"] == (
+        f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\n{MEMORY_INSTRUCTIONS}\n\nSYS-PROMPT"
+    )
 
 
 @pytest.mark.asyncio
-async def test_effective_prompt_instructions_only_when_domain_empty(monkeypatch):
+async def test_prompt_ends_with_instructions_when_domain_empty(monkeypatch):
     agent = FridayAgent(provider=_NoopProvider(), system_prompt="", memory=InMemoryStore())
 
     captured = await _capture_run_one_turn_kwargs(agent, monkeypatch)
 
-    assert captured["system_prompt"] == MEMORY_INSTRUCTIONS
+    assert captured["system_prompt"] == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\n{MEMORY_INSTRUCTIONS}"
 
 
 @pytest.mark.asyncio

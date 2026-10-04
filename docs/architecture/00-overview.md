@@ -32,15 +32,17 @@ async for item in engine.step(state):   ← AsyncGenerator
    │
    ├─ yield: AssistantMessage          ← immediately on response arrival
    ├─ yield: tool_result Message…      ← each tool result
-   └─ yield: LoopState | Terminal      ← exactly 1 final sentinel
-        On ContextOverflowError → caller runs engine.compact(state), then retries
+   └─ yield: LoopState | Suspended | Terminal   ← exactly 1 final sentinel (each carries the state to persist)
+        On ContextOverflowError → caller trims, runs engine.compact(state), then retries
 
-If item is LoopState, call step() again with it as-is; if Terminal, stop.
+If item is LoopState, call step() again with it as-is; if Suspended, persist item.state and attach the deferred results later with resume(); if Terminal, stop (item.state is the state to keep).
 ```
 
 Emitting the serializable `LoopState` as-is at each turn boundary supports **stateless distributed resume**.
 
 In addition, `FridayAgent` always registers and injects **TodoWrite (todo tracking)** as a built-in with no caller wiring, while **memory (`MemoryStore`)** is opt-in — it is mounted only when a store is explicitly injected via the `memory=` argument. See [02-tool-orchestration](02-tool-orchestration.md) · [08-memory](08-memory.md) for details.
+
+Per-turn state the model should see (current screen, progress) goes through `step(state, turn_sections=[...])` — strings the caller passes per call, each wrapped in a turn-local `<system-reminder>` on the last user message, never persisted and never part of the cached prefix (see [01-core-loop](01-core-loop.md)).
 
 ---
 
@@ -50,8 +52,7 @@ In addition, `FridayAgent` always registers and injects **TodoWrite (todo tracki
 |---|---|---|
 | `core/` | `loop.py`·`engine.py`·`state.py` | [01-core-loop](01-core-loop.md) |
 | `tools/` | `base.py`·`orchestrator.py`·`builtin/example_tool.py`·`builtin/todo_write.py` | [02-tool-orchestration](02-tool-orchestration.md) |
-| `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) |
-| `context/` | `compact.py` | [04-context-compaction](04-context-compaction.md) |
+| `api/` | `provider.py`·`configs.py`·`anthropic_provider.py`·`openai_provider.py`·`prompts.py` | [03-llm-providers](03-llm-providers.md) · compaction ([04-context-compaction](04-context-compaction.md)) is `FridayAgent.compact()` + the texts in `prompts.py` |
 | `messages/` | `types.py`·`normalize.py` | [05-messages](05-messages.md) |
 | (cross-cutting) | par-critical invariants | [06-invariants](06-invariants.md) |
 | (cross-cutting) | catalog of all data models | [07-data-models](07-data-models.md) |
