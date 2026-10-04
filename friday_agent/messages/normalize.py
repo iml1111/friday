@@ -9,25 +9,17 @@ def normalize_for_api(messages: list[Message]) -> list[dict]:
     Filtering rules:
     - synthetic messages (is_meta=True) are transcript-only and excluded
     - messages without a role (e.g. internal system messages) are excluded
-    - messages with empty content are excluded (the API rejects them)
+    - messages left with no content after block conversion are excluded (the
+      API rejects them)
 
     Each surviving message is normalized to {"role": str, "content": list[dict]}.
     """
     result = []
     for msg in messages:
-        if msg.is_meta:
+        if msg.is_meta or not msg.role:
             continue
-        if not msg.role:
-            continue
-        if not msg.content:
-            continue
-
-        api_content = _convert_content_blocks(msg.content)
-        if not api_content:
-            continue
-
-        result.append({"role": msg.role, "content": api_content})
-
+        if api_content := _convert_content_blocks(msg.content):
+            result.append({"role": msg.role, "content": api_content})
     return result
 
 

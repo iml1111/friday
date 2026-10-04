@@ -30,6 +30,12 @@ def test_empty_content_message_excluded():
     assert normalize_for_api([empty]) == []
 
 
+def test_message_whose_blocks_all_drop_is_excluded():
+    # A text block with text=None converts to nothing, leaving no content to send.
+    hollow = Message(type="user", role="user", content=[ContentBlock(type="text", text=None)])
+    assert normalize_for_api([hollow]) == []
+
+
 def test_tool_use_block_converts():
     msg = Message(
         type="assistant", role="assistant",
