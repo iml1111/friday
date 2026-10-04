@@ -63,12 +63,6 @@ _CONTEXT_OVERFLOW_SIGNALS: tuple[str, ...] = (
     "too many tokens",
 )
 
-# Stands in for an image block in a flattened tool_result: Chat Completions
-# tool messages are text-only, and serializing the base64 would add tokens
-# without the model ever seeing the image.
-_IMAGE_OMITTED = "[image omitted: not supported by the OpenAI adapter]"
-
-
 class OpenAIProvider(LLMProvider[OpenAIConfig]):
     """LLMProvider adapter for the OpenAI Chat Completions API.
 
@@ -233,7 +227,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         """Flatten tool_result content to the text-only form OpenAI tool messages take.
 
         A string passes through; a block array joins its text blocks and replaces
-        each image with _IMAGE_OMITTED; anything else is JSON-encoded.
+        each image with a text marker; anything else is JSON-encoded.
         """
         if isinstance(content, str):
             return content
@@ -244,7 +238,9 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
             if isinstance(block, dict) and block.get("type") == "text":
                 parts.append(block.get("text") or "")
             elif isinstance(block, dict) and block.get("type") == "image":
-                parts.append(_IMAGE_OMITTED)
+                # Tool messages are text-only, and sending the base64 would add
+                # tokens without the model ever seeing the image.
+                parts.append("[image omitted: not supported by the OpenAI adapter]")
             else:
                 parts.append(json.dumps(block))
         return "\n".join(p for p in parts if p)
