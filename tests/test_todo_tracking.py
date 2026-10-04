@@ -1,11 +1,6 @@
 """Todo/Task tracking: state effects, reminder injection, distributed resume."""
-from friday_agent.core.loop import apply_state_effects, render_todo_reminder, with_todo_reminder
-from friday_agent.messages.types import (
-    SYSTEM_REMINDER_PREFIX,
-    ContentBlock,
-    create_user_message,
-    create_tool_result_message,
-)
+from friday_agent.core.loop import _apply_state_effects
+from friday_agent.messages.types import ContentBlock, create_user_message
 
 import json
 import pytest
@@ -31,82 +26,28 @@ def _api_text(api_messages: list[dict]) -> str:
     return "\n".join(parts)
 
 
-# --- apply_state_effects -----------------------------------------------------
+# --- _apply_state_effects ----------------------------------------------------
 
 def test_apply_state_effects_replaces_on_todos_effect():
     start = [{"content": "old", "status": "pending"}]
     new = [{"content": "new", "status": "in_progress"}]
-    assert apply_state_effects(start, [{"todos": new}]) == new
+    assert _apply_state_effects(start, [{"todos": new}]) == new
 
 
 def test_apply_state_effects_carry_forward_when_no_effect():
     start = [{"content": "keep", "status": "pending"}]
-    assert apply_state_effects(start, []) == start
+    assert _apply_state_effects(start, []) == start
 
 
 def test_apply_state_effects_last_write_wins():
     a = [{"content": "a", "status": "pending"}]
     b = [{"content": "b", "status": "completed"}]
-    assert apply_state_effects([], [{"todos": a}, {"todos": b}]) == b
+    assert _apply_state_effects([], [{"todos": a}, {"todos": b}]) == b
 
 
 def test_apply_state_effects_ignores_unknown_effect_keys():
     start = [{"content": "keep", "status": "pending"}]
-    assert apply_state_effects(start, [{"something_else": 1}]) == start
-
-
-# --- render_todo_reminder ----------------------------------------------------
-
-def test_render_todo_reminder_empty_is_blank():
-    assert render_todo_reminder([]) == ""
-
-
-def test_render_todo_reminder_formats_items():
-    out = render_todo_reminder([
-        {"content": "Wire it up", "status": "in_progress"},
-        {"content": "Add tests", "status": "pending"},
-    ])
-    assert "<system-reminder>" in out and "</system-reminder>" in out
-    assert "- [in_progress] Wire it up" in out
-    assert "- [pending] Add tests" in out
-
-
-def test_todo_reminder_starts_with_shared_detection_prefix():
-    # Must open with the exact constant the Anthropic adapter's breakpoint
-    # skip matches on (see messages/types.py SYSTEM_REMINDER_PREFIX).
-    out = render_todo_reminder([{"content": "task", "status": "pending"}])
-    assert out.startswith(SYSTEM_REMINDER_PREFIX)
-
-
-# --- with_todo_reminder ------------------------------------------------------
-
-def test_with_todo_reminder_joins_trailing_user_turn():
-    todos = [{"content": "A", "status": "in_progress"}]
-    original = [create_tool_result_message(tool_use_id="t1", result_text="ok")]  # role == "user"
-    out = with_todo_reminder(original, todos)
-    # No new consecutive user message: still one trailing user turn.
-    assert len(out) == len(original)
-    last = out[-1]
-    assert last.role == "user"
-    assert last.content[0].type == "tool_result"          # original block preserved, first
-    assert last.content[-1].type == "text"                # reminder appended after
-    assert "<system-reminder>" in last.content[-1].text
-    # Input is not mutated (distributed-safe).
-    assert len(original[-1].content) == 1
-
-
-def test_with_todo_reminder_empty_todos_returns_unchanged():
-    msgs = [create_user_message("hi")]
-    assert with_todo_reminder(msgs, []) is msgs
-
-
-def test_with_todo_reminder_appends_user_msg_when_trailing_not_user():
-    todos = [{"content": "A", "status": "pending"}]
-    assistant = create_user_message("x")
-    assistant.role = "assistant"  # simulate a trailing non-user turn (defensive path)
-    out = with_todo_reminder([assistant], todos)
-    assert len(out) == 2 and out[-1].role == "user"
-    assert "<system-reminder>" in out[-1].content[0].text
+    assert _apply_state_effects(start, [{"something_else": 1}]) == start
 
 
 # --- TodoWrite tool ----------------------------------------------------------

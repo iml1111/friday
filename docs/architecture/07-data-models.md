@@ -89,7 +89,7 @@ Non-serializable runtime objects such as provider and config are intentionally e
 
 ### 2.3 LLM Response (wire) — `api/provider.py` → details [03-llm-providers](03-llm-providers.md)
 
-The result of `provider.complete()` normalizing a vendor response. `loop._to_assistant_message()` converts it into the internal `Message`/`ContentBlock`.
+The result of `provider.complete()` normalizing a vendor response. `run_one_turn()` converts it into the internal `Message`/`ContentBlock`.
 
 #### `AssistantResponse`
 
@@ -208,7 +208,7 @@ Data models of the `MemoryStore` subsystem. All are **Store-local** and are not 
 ```
 provider.complete()
    └─ AssistantResponse(content=[TextBlock|ToolUseBlock|ThinkingBlock], stop_reason, usage)
-        │  _to_assistant_message()          ← wire union → internal flat conversion
+        │  run_one_turn()                   ← wire union → internal flat conversion
         ▼
    Message(content=[ContentBlock(flat)])    ← accumulated in state.messages
         │  normalize_for_api()              ← internal → API wire dict (excludes is_meta · thinking verbatim)

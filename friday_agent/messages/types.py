@@ -124,8 +124,8 @@ def create_tool_result_message(
     )
 
 
-# Turn-local reminder protocol. Producers (render_todo_reminder in core/loop.py,
-# build_memory_reminder in memory/store.py) wrap reminder text via
+# Turn-local reminder protocol. Producers (format_todo_reminder in api/prompts.py,
+# build_memory_reminder in memory/store.py, turn_sections in core/engine.py) wrap reminder text via
 # wrap_system_reminder; the Anthropic adapter skips blocks starting with
 # SYSTEM_REMINDER_PREFIX when placing cache breakpoints — a breakpoint on a
 # non-persistent block creates a cache entry that never gets a hit. One

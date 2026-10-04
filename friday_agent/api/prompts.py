@@ -2,10 +2,12 @@
 
 ``assemble_system_prompt`` is the one place the system prompt's sections are
 ordered; FridayAgent calls it once and sends the result on every request. The
-compaction prompt and summary message used by ``FridayAgent.compact`` live
-here too.
+per-turn todo reminder, and the compaction prompt and summary message used by
+``FridayAgent.compact``, live here too.
 """
 from __future__ import annotations
+
+from friday_agent.messages.types import wrap_system_reminder
 
 
 GENERAL_AGENT_GUIDANCE: str = """# System
@@ -56,6 +58,23 @@ def assemble_system_prompt(system_prompt: str, memory_instructions: str = "") ->
     """
     blocks = (GENERAL_AGENT_GUIDANCE, TODO_GUIDANCE, memory_instructions, system_prompt)
     return "\n\n".join(b for b in blocks if b)
+
+
+# Per-turn todo reminder: FridayAgent.step() renders LoopState.todos into it and
+# carries it on messages[-1] only, so the list never enters the history.
+TODO_REMINDER: str = (
+    "Current todo list (update via TodoWrite as you progress; keep one item in_progress):\n"
+    "{items}\n"
+    "This reflects tracked state, not necessarily the user's latest instruction."
+)
+
+
+def format_todo_reminder(todos: list[dict]) -> str:
+    """TODO_REMINDER for the live list, as a <system-reminder> ('' when empty)."""
+    if not todos:
+        return ""
+    items = "\n".join(f"- [{t.get('status', 'pending')}] {t.get('content', '')}" for t in todos)
+    return wrap_system_reminder(TODO_REMINDER.format(items=items))
 
 
 # ---------------------------------------------------------------------------

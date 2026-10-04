@@ -24,7 +24,7 @@ The `api/` package consolidates three responsibilities into a single swap bounda
 | `api/configs.py` | Per-vendor call config | `AnthropicConfig`, `OpenAIConfig` |
 | `api/anthropic_provider.py` | Anthropic adapter | `AnthropicProvider` |
 | `api/openai_provider.py` | OpenAI adapter | `OpenAIProvider` |
-| `api/prompts.py` | System prompt assembly | `assemble_system_prompt()` |
+| `api/prompts.py` | System prompt assembly · per-turn todo reminder | `assemble_system_prompt()`, `format_todo_reminder()` |
 
 ---
 
@@ -95,6 +95,7 @@ The library provides no provider construction factory — adapters (`AnthropicPr
 ### System Prompt Assembly (prompts.py)
 
 - `assemble_system_prompt(system_prompt, memory_instructions="") -> str` — the only place the system prompt's sections are ordered: `GENERAL_AGENT_GUIDANCE` → `TODO_GUIDANCE` → `memory_instructions` → the base prompt (generic→specific: domain rules get the recency advantage). Empty sections are skipped. `FridayAgent.__init__` calls it once, and the plain string is passed to `LLMProvider.complete(system_prompt=...)` on every `step()` and `compact()` request.
+- `format_todo_reminder(todos) -> str` — renders `TODO_REMINDER` for the live `LoopState.todos` as a `<system-reminder>` (`""` when the list is empty). `engine.step()` puts it first among the turn reminders, which ride `messages[-1]` only.
 
 ---
 

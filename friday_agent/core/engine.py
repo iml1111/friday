@@ -13,7 +13,12 @@ import copy
 from collections import Counter
 from typing import AsyncGenerator
 
-from friday_agent.api.prompts import assemble_system_prompt, format_compact_prompt, format_compact_summary_message
+from friday_agent.api.prompts import (
+    assemble_system_prompt,
+    format_compact_prompt,
+    format_compact_summary_message,
+    format_todo_reminder,
+)
 from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMError, LLMProvider, ToolSchema, ToolUseBlock
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
@@ -140,12 +145,13 @@ class FridayAgent:
                 state and retries — compact() re-sends this same prefix, so trim
                 the oldest turns first (see compact()).
         """
-        # Per-turn content (the live memory index, then the caller's
-        # turn_sections) rides messages[-1] as turn-local reminders — in the
-        # system prompt it would invalidate the whole conversation cache.
+        # Per-turn content (the todo list, the live memory index, then the
+        # caller's turn_sections) rides messages[-1] as turn-local reminders —
+        # in the system prompt it would invalidate the whole conversation cache.
         turn_reminders = [
             reminder
             for reminder in (
+                format_todo_reminder(state.todos),
                 await build_memory_reminder(self._memory) if self._memory is not None else "",
                 *(wrap_system_reminder(text) for text in turn_sections or [] if text),
             )

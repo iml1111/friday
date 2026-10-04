@@ -163,9 +163,10 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
 
     @staticmethod
     def _is_turn_reminder(block: dict) -> bool:
-        # Every turn-local reminder producer (todo in core/loop.py, memory
-        # index in memory/store.py) wraps via messages.types.wrap_system_reminder,
-        # so the shared SYSTEM_REMINDER_PREFIX is the detection contract.
+        # Every turn-local reminder producer (todo list in api/prompts.py, memory
+        # index in memory/store.py, turn_sections in core/engine.py) wraps via
+        # messages.types.wrap_system_reminder, so the shared SYSTEM_REMINDER_PREFIX
+        # is the detection contract.
         return (
             block.get("type") == "text"
             and str(block.get("text", "")).startswith(SYSTEM_REMINDER_PREFIX)

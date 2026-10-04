@@ -3,7 +3,9 @@ from friday_agent.api.prompts import (
     GENERAL_AGENT_GUIDANCE,
     TODO_GUIDANCE,
     assemble_system_prompt,
+    format_todo_reminder,
 )
+from friday_agent.messages.types import SYSTEM_REMINDER_PREFIX
 
 
 def test_assemble_returns_plain_str():
@@ -56,6 +58,29 @@ def test_memory_instructions_sit_between_guidance_and_base():
 def test_memory_instructions_without_base():
     out = assemble_system_prompt("", "MEMORY-INSTRUCTIONS")
     assert out == f"{GENERAL_AGENT_GUIDANCE}\n\n{TODO_GUIDANCE}\n\nMEMORY-INSTRUCTIONS"
+
+
+# --- Per-turn todo reminder ---------------------------------------------------
+
+def test_todo_reminder_empty_is_blank():
+    assert format_todo_reminder([]) == ""
+
+
+def test_todo_reminder_formats_items():
+    out = format_todo_reminder([
+        {"content": "Wire it up", "status": "in_progress"},
+        {"content": "Add tests", "status": "pending"},
+    ])
+    assert "<system-reminder>" in out and "</system-reminder>" in out
+    assert "- [in_progress] Wire it up" in out
+    assert "- [pending] Add tests" in out
+
+
+def test_todo_reminder_starts_with_shared_detection_prefix():
+    # Must open with the exact constant the Anthropic adapter's breakpoint
+    # skip matches on (see messages/types.py SYSTEM_REMINDER_PREFIX).
+    out = format_todo_reminder([{"content": "task", "status": "pending"}])
+    assert out.startswith(SYSTEM_REMINDER_PREFIX)
 
 
 def test_colon_rule_does_not_mandate_preamble_text():

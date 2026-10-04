@@ -27,28 +27,28 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 ## ③ Core Behavior — `run_one_turn()` Turn Lifecycle
 
-`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:162`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`LoopState`, `Suspended` or `Terminal`) at the end and finishes.
+`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:56`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`LoopState`, `Suspended` or `Terminal`) at the end and finishes.
 
 ### Execution Order
 
 ```
 0. pending_tool_uses(state) non-empty → raise PendingToolUseError (no request)
-1. api_input_messages = list(state.messages)
-      └─ inject <system-reminder> via with_turn_reminders() (API view only · non-persistent):
-         in order: [todo reminder (when state.todos is set)] + turn_reminders param (engine passes memory index, then step()'s turn_sections)
-      └─ normalize_for_api(api_input_messages) → provider.complete()   ← LLM call
+1. api_messages = list(state.messages)
+      └─ join the turn_reminders param onto the trailing user message (API view only · non-persistent);
+         the engine renders them in order: todo list, memory index, step()'s turn_sections
+      └─ normalize_for_api(api_messages) → provider.complete()   ← LLM call
 
-2. response → _to_assistant_message()     ← converted to internal Message, then yielded
+2. response blocks → internal assistant Message (converted inline), then yielded
 
-3. if there are tool_use blocks
-      ├─ deferred calls (Tool.is_deferred → True) are held back
-      └─ run_tools(the rest, effects_sink=effects) ← parallel tool execution + state_effect collection
+3. tool_use blocks: deferred calls (Tool.is_deferred → True) are held back;
+      run_tools(the rest, effects_sink=effects) ← parallel tool execution + state_effect collection
             └─ yield tool_result message (each result)
 
-4. end of turn: yield 1 sentinel (next_todos = apply_state_effects(state.todos, effects))
-      LoopState              ─ loop continues (clean state.messages + next_todos)
-      Suspended              ─ paused on deferred calls: .state (to persist) + .pending (tool_use blocks)
-      Terminal               ─ loop terminates; .state = the state to persist
+4. end of turn: next_state = state.messages + assistant + tool results,
+      todos = _apply_state_effects(state.todos, effects); yield 1 sentinel:
+      Suspended              ─ deferred calls exist: .state (to persist) + .pending (tool_use blocks)
+      LoopState              ─ the tools ran, loop continues
+      Terminal(completed)    ─ no tool_use blocks; .state = the state to persist
 ```
 
 ### Termination / Transition Branch Table
@@ -174,7 +174,7 @@ async for item in engine.step(state): ...        # the next turn, as usual
 - **`tool_use↔tool_result` pair preservation.** `run_tools()` emits exactly one `tool_result` per executed `tool_use` (unknown tools and exceptions become error results), and the only error path (`LLMError` from the provider call) fires before an assistant message exists — so no unpaired `tool_use` is ever persisted. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
-- **Per-turn reminders are non-persistent.** Every turn, `run_one_turn()` uses `with_turn_reminders()` to merge `<system-reminder>` blocks (todo reminder + caller-provided `turn_reminders`) into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state.messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting. `step()`'s `turn_sections` follow the same path (after the memory index), so they never reach `LoopState`, the cached prefix, or `compact()`.
+- **Per-turn reminders are non-persistent.** Every turn, `engine.step()` renders the `<system-reminder>` blocks (todo list → memory index → `turn_sections`, in one place) and `run_one_turn()` joins them onto the last user turn of an **API-view-only copy (`api_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state.messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting. `step()`'s `turn_sections` follow the same path (after the memory index), so they never reach `LoopState`, the cached prefix, or `compact()`.
 
 ---
 
