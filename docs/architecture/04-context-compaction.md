@@ -89,6 +89,7 @@ async def compact(self, state: LoopState) -> LoopState:
 - Returns: a new `LoopState` holding a single summary message (`messages=[summary_message]`) and the preserved `turn_count`
 - The caller passes the returned reduced state straight to `step()` to retry
 - Domain summary instructions are set once via the constructor `FridayAgent(..., compact_instructions=...)`, not as a call argument
+- Raises `PendingToolUseError` when the state still has unanswered `tool_use` blocks (a suspended turn) — attach them with `resume()` first; the summary call would otherwise send the unpaired `tool_use`.
 
 ### `compact_conversation()` — for direct use
 

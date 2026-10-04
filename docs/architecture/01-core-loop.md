@@ -19,9 +19,9 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching | `run_one_turn()` |
+| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · pending-call guard | `run_one_turn()`, `pending_tool_uses()` |
 | `friday_agent/core/engine.py` | External entry point, direct provider injection, memory tool registration · section injection | `FridayAgent.step()`, `FridayAgent.compact()` |
-| `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `LoopState` (`to_dict`/`from_dict`) |
+| `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `LoopState` (`to_dict`/`from_dict`), `PendingToolUseError` |
 
 ---
 
@@ -32,6 +32,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 ### Execution Order
 
 ```
+0. pending_tool_uses(state) non-empty → raise PendingToolUseError (no request)
 1. api_input_messages = list(state.messages)
       └─ inject <system-reminder> via with_turn_reminders() (API view only · non-persistent):
          in order: [todo reminder (when state.todos is set)] + turn_reminders param (engine passes memory index, then turn_sections outputs)
@@ -54,6 +55,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 | Condition | Result |
 |---|---|
+| State has unanswered `tool_use` (pending) | **raises `PendingToolUseError`** before any request — `step()` and `compact()` alike |
 | No tool_use (non-tool stop such as end_turn) | `Terminal(reason="completed", state=…)` — `state` = input + assistant message, `turn_count+1` |
 | `LLMError` (excluding overflow) | `Terminal(reason="model_error", error=..., state=…)` — `state` = the input state; retry with `step(terminal.state)` |
 | `ContextOverflowError` | **raised to the caller** (not a Terminal) — retry after `engine.compact()` |
@@ -114,6 +116,10 @@ step(state) → ContextOverflowError raised
 ```
 
 See [04-context-compaction](04-context-compaction.md) for details.
+
+### Pending Calls — `pending_tool_uses(state)` / `PendingToolUseError`
+
+`pending_tool_uses(state)` (`core/loop.py`) returns the `tool_use` blocks of the last assistant message that have no `tool_result` after it. It is a pure function of history, so it gives the same answer for a deserialized state. While it is non-empty, `step()` and `compact()` raise `PendingToolUseError(tool_use_ids)` (a `ValueError`, not an `LLMError`) before doing anything — even when a user message was appended after the unanswered calls. Previously such a state reached the API and came back as a 400 `model_error`.
 
 ### State Types
 

@@ -28,7 +28,7 @@ from friday_agent.api.provider import (
     ToolUseBlock,
 )
 from friday_agent.api.prompts import assemble_system_prompt
-from friday_agent.core.state import LoopState, Terminal
+from friday_agent.core.state import LoopState, PendingToolUseError, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import (
     ContentBlock,
@@ -71,6 +71,38 @@ def _to_assistant_message(response: AssistantResponse) -> Message:
 def _extract_tool_use_blocks(message: Message) -> list[ContentBlock]:
     """Return all tool_use ContentBlocks from an assistant Message."""
     return [block for block in message.content if block.type == "tool_use"]
+
+
+def _last_assistant_index(messages: list[Message]) -> int | None:
+    """Index of the last assistant message, or None if there is none."""
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == "assistant":
+            return i
+    return None
+
+
+def pending_tool_uses(state: LoopState) -> list[ContentBlock]:
+    """Return the tool_use blocks still waiting for a result.
+
+    Only the last assistant message can hold them (any earlier one was answered
+    before the next model call), so pending calls are recomputed from history
+    alone — LoopState needs no extra field, and a deserialized state gives the
+    same answer. Pure function: no provider, no tools.
+    """
+    last = _last_assistant_index(state.messages)
+    if last is None:
+        return []
+    answered = {
+        block.tool_use_id
+        for msg in state.messages[last + 1:]
+        for block in msg.content
+        if block.type == "tool_result"
+    }
+    return [
+        block
+        for block in state.messages[last].content
+        if block.type == "tool_use" and block.id not in answered
+    ]
 
 
 def apply_state_effects(todos: list[dict], effects: list[dict]) -> list[dict]:
@@ -161,9 +193,16 @@ async def run_one_turn(
             Terminal when the loop ends, LoopState when it continues.
 
     Raises:
+        PendingToolUseError: when state still has unanswered tool_use blocks
+            (raised before the provider is called).
         ContextOverflowError: when the provider rejects the messages as too long.
             The caller should compact state via engine.compact() and retry.
     """
+    # Never send an unpaired tool_use: the API would reject it, and the 400
+    # would surface only as an opaque model_error.
+    if pending := pending_tool_uses(state):
+        raise PendingToolUseError([block.id or "" for block in pending])
+
     config = config or provider.config_type()
 
     # API view only (turn-local, never persisted): inject the live todo reminder

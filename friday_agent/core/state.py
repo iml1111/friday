@@ -64,3 +64,23 @@ class LoopState:
             turn_count=d.get("turn_count", 1),
             todos=d.get("todos", []),
         )
+
+
+# ---------------------------------------------------------------------------
+# PendingToolUseError — refusing to send an unpaired tool_use
+# ---------------------------------------------------------------------------
+class PendingToolUseError(ValueError):
+    """Raised when a state with unanswered tool_use blocks would be sent to the model.
+
+    Such a state is a suspended turn waiting for external results: attach them
+    with resume() (an is_error result closes a call that will never finish)
+    before calling step() or compact(). A ValueError — a caller-side invalid
+    state, never an LLMError / model_error.
+    """
+
+    def __init__(self, tool_use_ids: list[str]) -> None:
+        self.tool_use_ids = tool_use_ids
+        super().__init__(
+            f"state has tool_use blocks without a tool_result: {tool_use_ids}; "
+            "attach their results with resume() first"
+        )

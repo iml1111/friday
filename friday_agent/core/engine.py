@@ -18,8 +18,8 @@ from friday_agent.memory.store import (
     MemoryStore,
     build_memory_reminder,
 )
-from friday_agent.core.loop import run_one_turn
-from friday_agent.core.state import LoopState, Terminal
+from friday_agent.core.loop import pending_tool_uses, run_one_turn
+from friday_agent.core.state import LoopState, PendingToolUseError, Terminal
 from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import Message, wrap_system_reminder
 from friday_agent.tools.base import Tool
@@ -124,10 +124,14 @@ class FridayAgent:
         unchanged: serialize the final LoopState directly.
 
         Raises:
+            PendingToolUseError: the state still has unanswered tool_use blocks —
+                checked before anything else (no section rendered, no request sent).
             ContextOverflowError: propagated from run_one_turn during iteration when the
                 provider rejects the messages as too long. The caller compacts via
                 engine.compact(state) and retries.
         """
+        if pending := pending_tool_uses(state):
+            raise PendingToolUseError([block.id or "" for block in pending])
         # System prefix: static pieces only, ordered generic -> specific
         # (memory instructions -> domain prompt) — must be byte-stable within a
         # session so the cache prefix survives. Per-turn content (the live memory
@@ -170,7 +174,13 @@ class FridayAgent:
         The summarizer runs under SUMMARIZER_SYSTEM_PROMPT, not system_prompt —
         compact_instructions (constructor) is the injection point for domain
         requirements about what the summary must preserve.
+
+        Raises:
+            PendingToolUseError: the state still has unanswered tool_use blocks
+                (its summary call would send them unpaired).
         """
+        if pending := pending_tool_uses(state):
+            raise PendingToolUseError([block.id or "" for block in pending])
         api_messages = normalize_for_api(state.messages)
         summary_text = await compact_conversation(
             provider=self._provider,

@@ -115,7 +115,7 @@ The result of `provider.complete()` normalizing a vendor response. `loop._to_ass
 
 #### Exception hierarchy (not models, but flow-control types)
 
-`LLMError`(base) → `RateLimitError` · `ContextOverflowError` · `AuthError` · `TransientError`. **`ContextOverflowError` triggers caller-driven compact** ([04-context-compaction](04-context-compaction.md)).
+`LLMError`(base) → `RateLimitError` · `ContextOverflowError` · `AuthError` · `TransientError`. **`ContextOverflowError` triggers caller-driven compact** ([04-context-compaction](04-context-compaction.md)). `PendingToolUseError` (`core/state.py`) is deliberately **not** an `LLMError`: a `ValueError` raised by `step()`/`compact()` when the state still has unanswered `tool_use` blocks ([01-core-loop](01-core-loop.md)).
 
 ---
 
