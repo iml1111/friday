@@ -19,6 +19,7 @@ class ToolResult:
     data: Any                          # execution result (string or structured data)
     is_error: bool = False
     state_effect: dict | None = None   # declarative loop-state mutation, e.g. {"todos": [...]}
+    image: dict | None = None          # {"media_type": "image/png", "data": "<base64>"} — sent next to data
 
 
 # ---------------------------------------------------------------------------

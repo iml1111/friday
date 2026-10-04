@@ -12,7 +12,7 @@ class ContentBlock:
     name: str | None = None            # type=="tool_use"
     input: dict | None = None          # type=="tool_use" — SDK already parses this to a dict
     tool_use_id: str | None = None     # type=="tool_result"
-    content: str | None = None         # type=="tool_result"
+    content: str | list[dict] | None = None   # type=="tool_result" — text, or [text, image] blocks
     is_error: bool = False             # type=="tool_result"
     signature: str | None = None       # type=="thinking" — required by the API when echoing thinking back
 
@@ -99,14 +99,26 @@ def create_tool_result_message(
     tool_use_id: str,
     result_text: str,
     is_error: bool = False,
+    image: dict | None = None,
 ) -> Message:
+    """Build a user message carrying one tool_result block.
+
+    Without an image the content is the result string (wrapped in
+    <tool_use_error> when is_error). With an image ({"media_type", "data"}) it
+    becomes a [text, image] block array, which tool_result accepts natively.
+    """
+    body = f"<tool_use_error>{result_text}</tool_use_error>" if is_error else result_text
+    content: str | list[dict] = body if image is None else [
+        {"type": "text", "text": body},
+        {"type": "image", "source": {"type": "base64", **image}},
+    ]
     return Message(
         type="user",
         role="user",
         content=[ContentBlock(
             type="tool_result",
             tool_use_id=tool_use_id,
-            content=f"<tool_use_error>{result_text}</tool_use_error>" if is_error else result_text,
+            content=content,
             is_error=is_error,
         )],
     )

@@ -46,7 +46,7 @@ Only models with `to_dict()` / `from_dict()` are **transport units for distribut
 | `type` | All | `text` \| `tool_use` \| `tool_result` \| `thinking` |
 | `text` | `text`·`thinking` | Text / thinking content |
 | `id`·`name`·`input` | `tool_use` | Call ID · tool name · arguments (dict, parsed by the SDK) |
-| `tool_use_id`·`content`·`is_error` | `tool_result` | Matching tool_use ID · result text · error flag |
+| `tool_use_id`·`content`·`is_error` | `tool_result` | Matching tool_use ID · result text (or a `[text, image]` block array) · error flag |
 
 > **⚠️ Name collision**: this `ContentBlock` (internal flat dataclass) and the `ContentBlock` in `api/provider.py` (2.3 below, a Union alias) **share only the name and are distinct types**. When importing both into the same scope, distinguish them with `as`.
 
@@ -142,6 +142,7 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 | `data` | `Any` | Execution result (string/structured data) |
 | `is_error` | `bool` | Error flag (default `False`) |
 | `state_effect` | `dict \| None` | Declarative loop-state mutation (e.g. `{"todos": [...]}`); applied by the loop, default `None` |
+| `image` | `dict \| None` | `{"media_type", "data"}` (base64) — sent as an image block next to the text; default `None` |
 
 #### `Batch` (orchestrator-internal) — partitioning output
 

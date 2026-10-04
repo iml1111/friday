@@ -63,6 +63,32 @@ _CONTEXT_OVERFLOW_SIGNALS: tuple[str, ...] = (
     "too many tokens",
 )
 
+# Stands in for an image block in a flattened tool_result: Chat Completions
+# tool messages are text-only, and serializing the base64 would add tokens
+# without the model ever seeing the image.
+_IMAGE_OMITTED = "[image omitted: not supported by the OpenAI adapter]"
+
+
+def _flatten_tool_result_content(content) -> str:
+    """Flatten tool_result content to the text-only form OpenAI tool messages take.
+
+    A string passes through; a block array joins its text blocks and replaces
+    each image with _IMAGE_OMITTED; anything else is JSON-encoded.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return json.dumps(content)
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text") or "")
+        elif isinstance(block, dict) and block.get("type") == "image":
+            parts.append(_IMAGE_OMITTED)
+        else:
+            parts.append(json.dumps(block))
+    return "\n".join(p for p in parts if p)
+
 
 class OpenAIProvider(LLMProvider[OpenAIConfig]):
     """LLMProvider adapter for the OpenAI Chat Completions API.
@@ -157,6 +183,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
           - text blocks   → message content string
           - tool_use blocks (assistant) → assistant.tool_calls (arguments as JSON string)
           - tool_result blocks (user)   → separate {"role": "tool", tool_call_id, content} messages, emitted before that turn's text
+          - tool_result block arrays → text joined, images replaced by a marker (_flatten_tool_result_content)
           - thinking blocks → no OpenAI equivalent; dropped
 
         The tool_use↔tool_result pairing invariant is preserved because the internal
@@ -195,11 +222,10 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
                         },
                     })
                 elif btype == "tool_result":
-                    content = b.get("content")
                     tool_msgs.append({
                         "role": "tool",
                         "tool_call_id": b.get("tool_use_id") or "",
-                        "content": content if isinstance(content, str) else json.dumps(content),
+                        "content": _flatten_tool_result_content(b.get("content")),
                     })
 
             if role == "assistant":

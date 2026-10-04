@@ -19,7 +19,7 @@ Core contract:
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `Batch` |
+| `friday_agent/tools/orchestrator.py` | Partitioning · parallel/sequential execution · order preservation | `partition_tool_calls()`, `run_tools()`, `to_tool_result_message()`, `Batch` |
 | `friday_agent/tools/base.py` | Tool interface · result type | `Tool`, `ToolResult` |
 | `friday_agent/tools/builtin/example_tool.py` | Demo tool (authoring pattern) | `ExampleTool` |
 
@@ -87,7 +87,7 @@ run_one_turn()
             ├─ parallel Batch: asyncio.gather + Semaphore → yield in block order
             └─ sequential Batch: yield blocks one at a time, in order
                     │
-                    each block → _run_single_tool() → tool_result Message
+                    each block → _run_single_tool() → to_tool_result_message() → tool_result Message
                                      └─ on error: error tool_result (batch not aborted)
 ```
 
@@ -150,8 +150,11 @@ ToolResult(
     data,                   # execution result (string or structured data)
     is_error=False,
     state_effect=None,      # declarative state mutation (e.g. {"todos": [...]}); applied solely by the loop
+    image=None,             # {"media_type": "image/png", "data": "<base64>"} — sent as an image block next to the text
 )
 ```
+
+`to_tool_result_message(tool_use_id, result)` is the single `ToolResult` → `tool_result` message conversion (data → text, `is_error` → `<tool_use_error>` wrapping, `image` → block array). It is shared by `run_tools` and `resume()`.
 
 ---
 

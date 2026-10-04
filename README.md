@@ -205,6 +205,8 @@ class WeatherTool(Tool):
 
 Pass the tool you built to `FridayAgent(tools=[WeatherTool()])` and the model can call it.
 
+A tool can return an image next to its text — `ToolResult(data="Captured.", image={"media_type": "image/png", "data": b64})`. Anthropic models see the image; the OpenAI adapter sends the text plus an `[image omitted ...]` marker.
+
 > `TodoWrite` (always) and the memory tools (`memory_save`/`memory_read`/`memory_delete`, when `memory=` is mounted) are registered by the SDK, so do not put them in `tools=` yourself — if the names collide, `FridayAgent.__init__` rejects them with `ValueError` (see [Built-in Capabilities](#built-in-capabilities)).
 
 #### How the LLM Recognizes Tools

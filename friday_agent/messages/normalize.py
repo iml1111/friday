@@ -46,6 +46,8 @@ def _convert_content_blocks(blocks: list[ContentBlock]) -> list[dict]:
                 "input": block.input,
             })
         elif block.type == "tool_result":
+            # content is a string, or a [text, image] block array for image
+            # results — both pass through as-is (adapters own the wire form).
             entry: dict = {
                 "type": "tool_result",
                 "tool_use_id": block.tool_use_id,

@@ -15,7 +15,7 @@ from typing import AsyncGenerator
 from pydantic import ValidationError
 
 from friday_agent.messages.types import ContentBlock, Message, create_tool_result_message
-from friday_agent.tools.base import Tool
+from friday_agent.tools.base import Tool, ToolResult
 
 
 @dataclass
@@ -103,6 +103,20 @@ def partition_tool_calls(
     return batches
 
 
+def to_tool_result_message(tool_use_id: str, result: ToolResult) -> Message:
+    """Convert a ToolResult into its tool_result message (data, error flag, image).
+
+    The single conversion shared by run_tools and core.loop.resume(), so results
+    produced inside step() and results attached later behave identically.
+    """
+    return create_tool_result_message(
+        tool_use_id=tool_use_id,
+        result_text=str(result.data),
+        is_error=result.is_error,
+        image=result.image,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Single-tool execution helper
 # ---------------------------------------------------------------------------
@@ -124,11 +138,7 @@ async def _run_single_tool(block: ContentBlock, tools: list[Tool]) -> tuple[Mess
 
     try:
         result = await tool.call(block.input or {})
-        return create_tool_result_message(
-            tool_use_id=block.id or "",
-            result_text=str(result.data),
-            is_error=result.is_error,
-        ), result.state_effect
+        return to_tool_result_message(block.id or "", result), result.state_effect
     except Exception as exc:
         return create_tool_result_message(
             tool_use_id=block.id or "",

@@ -30,7 +30,7 @@ A single flat dataclass that represents every block kind with one type.
 | `name` | `str \| None` | `tool_use` | Tool name |
 | `input` | `dict \| None` | `tool_use` | Tool arguments (the Anthropic SDK passes them already parsed into a dict) |
 | `tool_use_id` | `str \| None` | `tool_result` | ID of the corresponding tool_use |
-| `content` | `str \| None` | `tool_result` | Tool execution result text |
+| `content` | `str \| list[dict] \| None` | `tool_result` | Tool result text — or a `[text, image]` block array when the tool returned an image |
 | `is_error` | `bool` | `tool_result` | Whether execution errored (default `False`) |
 
 > **⚠️ Name collision warning**: `ContentBlock` in `messages/types.py` (single flat dataclass, defined above) and `ContentBlock` in `api/provider.py:34` (`Union[TextBlock, ToolUseBlock, ThinkingBlock]` alias) **share only the name and are completely separate types**. The former is a dataclass for internal representation; the latter is a Union alias of Anthropic SDK types. Watch for the collision when importing both files in the same scope.
@@ -76,12 +76,14 @@ def create_tool_result_message(
     tool_use_id: str,
     result_text: str,
     is_error: bool = False,
+    image: dict | None = None,
 ) -> Message:
 ```
 
 - Fixed to `type="user"`, `role="user"` (complies with the API role alternation rule).
 - If `is_error=True`, `content` is wrapped as `<tool_use_error>result_text</tool_use_error>`.
 - The `is_error` value is passed through to `ContentBlock.is_error` as-is.
+- If `image` is given (`{"media_type", "data"}`, base64), `content` becomes `[{"type": "text", "text": ...}, {"type": "image", "source": {"type": "base64", ...}}]`; otherwise the string, exactly as before.
 
 ---
 
@@ -105,7 +107,7 @@ Converts the internal `Message` list into the `{"role": str, "content": list[dic
 |---|---|
 | `text` | `{"type":"text", "text":...}` (omitted if `text` is `None`) |
 | `tool_use` | `{"type":"tool_use", "id":..., "name":..., "input":...}` |
-| `tool_result` | `{"type":"tool_result", "tool_use_id":..., "content":...}` (adds `"is_error":True` if is_error=True) |
+| `tool_result` | `{"type":"tool_result", "tool_use_id":..., "content":...}` (content passed as-is — string or block array; adds `"is_error":True` if is_error=True) |
 | `thinking` | `{"type":"thinking", "thinking":...}` (echoes the `text` field under the `thinking` key) |
 
 > **Verbatim echo of thinking blocks**: thinking blocks must be returned to the API as-is, without omission. If even one intermediate thinking block is missing, the API rejects that turn's conversation structure. This rule is also stated separately in [06-invariants](06-invariants.md).
@@ -133,7 +135,7 @@ Conversely, the subsystems below depend on this package:
 
 | Dependency Module | Symbols Used |
 |---|---|
-| `friday_agent/core/loop.py` | `normalize_for_api()`, `create_tool_result_message()` |
+| `friday_agent/core/loop.py` | `normalize_for_api()` |
 | `friday_agent/core/engine.py` | `normalize_for_api()` |
 | `friday_agent/tools/orchestrator.py` | `create_tool_result_message()` |
 | `friday_agent/context/compact.py` | `create_user_message()` (inside `create_compact_summary_message()`) |
