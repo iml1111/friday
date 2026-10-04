@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Generic, Literal, Protocol, TypeVar, Union, runtime_checkable
+from typing import Any, Generic, Literal, Protocol, TypedDict, TypeVar, Union, runtime_checkable
 
 
 @dataclass
@@ -104,6 +104,14 @@ class LLMConfig(Protocol):
 ConfigT = TypeVar("ConfigT", bound=LLMConfig)
 
 
+class ToolSchema(TypedDict):
+    """One tool definition as the model sees it: built by Tool.get_tool_schema(),
+    passed to LLMProvider.complete(tools=...). A plain dict at runtime."""
+    name: str
+    description: str
+    input_schema: dict[str, Any]  # JSON Schema of the tool's input
+
+
 class LLMProvider(ABC, Generic[ConfigT]):
     """Abstract interface for an LLM backend.
 
@@ -124,7 +132,7 @@ class LLMProvider(ABC, Generic[ConfigT]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: ConfigT,
     ) -> "AssistantResponse":
         """Perform a single completion call.
@@ -133,8 +141,7 @@ class LLMProvider(ABC, Generic[ConfigT]):
             messages: Conversation history. Each element is
                       ``{"role": "user"|"assistant"|"tool", "content": ...}``.
             system_prompt: System prompt text.
-            tools: Tool definitions. Each dict must have at least "name",
-                   "description", and "input_schema" keys.
+            tools: Tool definitions (ToolSchema).
             config: Call settings.
 
         Returns:

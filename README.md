@@ -214,7 +214,7 @@ A tool can return an image next to its text — `ToolResult(data="Captured.", im
 
 #### How the LLM Recognizes Tools
 
-Everything the model relies on to judge "what this tool is and how to call it" reduces to the **3 keys** built by `Tool.get_tool_schema()`
+Everything the model relies on to judge "what this tool is and how to call it" reduces to the **3 keys** built by `Tool.get_tool_schema()` (typed as `ToolSchema`)
 (`friday_agent/tools/base.py`). The schema that the `WeatherTool` above actually
 sends is as follows (passed to the API as-is):
 

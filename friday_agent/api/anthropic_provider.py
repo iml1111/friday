@@ -22,6 +22,7 @@ from friday_agent.api.provider import (
     TextBlock,
     ThinkingBlock,
     TokenUsage,
+    ToolSchema,
     ToolUseBlock,
     TransientError,
 )
@@ -103,7 +104,7 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: AnthropicConfig | None,
     ) -> AssistantResponse:
         """Execute a single completion call.
@@ -126,7 +127,7 @@ class AnthropicProvider(LLMProvider[AnthropicConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         cfg: AnthropicConfig,
     ) -> dict:
         """Build kwargs for `messages.create()`."""

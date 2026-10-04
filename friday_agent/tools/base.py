@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from friday_agent.api.provider import ToolSchema
+
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -158,7 +160,7 @@ class Tool(ABC):
         """Execute the tool and return a ToolResult."""
         ...
 
-    def get_tool_schema(self) -> dict:
+    def get_tool_schema(self) -> ToolSchema:
         """Build the tool schema dict to send to the API."""
         schema = _inline_defs(self.input_schema().model_json_schema())
         # Strip cosmetic titles everywhere (top-level and nested). $defs/$ref are

@@ -14,7 +14,7 @@ from collections import Counter
 from typing import AsyncGenerator
 
 from friday_agent.api.prompts import assemble_system_prompt, format_compact_prompt, format_compact_summary_message
-from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolUseBlock
+from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolSchema, ToolUseBlock
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     MemoryStore,
@@ -103,7 +103,7 @@ class FridayAgent:
         self._max_concurrency = max_concurrency
         self._compact_instructions = compact_instructions
 
-    def _tool_schemas(self) -> list[dict]:
+    def _tool_schemas(self) -> list[ToolSchema]:
         return [tool.get_tool_schema() for tool in self._tools]
 
     async def step(

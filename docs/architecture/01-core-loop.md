@@ -27,7 +27,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 ## ③ Core Behavior — `run_one_turn()` Turn Lifecycle
 
-`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:161`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`LoopState`, `Suspended` or `Terminal`) at the end and finishes.
+`run_one_turn()` is an `AsyncGenerator` defined at `friday_agent/core/loop.py:162`. It yields every `Message` produced during the turn, then yields exactly **1 sentinel** (`LoopState`, `Suspended` or `Terminal`) at the end and finishes.
 
 ### Execution Order
 

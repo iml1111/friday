@@ -153,6 +153,16 @@ Routed and validated via `provider.config_type`; when unspecified, `provider.con
 | `state_effect` | `dict \| None` | Declarative loop-state mutation (e.g. `{"todos": [...]}`); applied by the loop, default `None` |
 | `image` | `dict \| None` | `{"media_type", "data"}` (base64) — sent as an image block next to the text; default `None` |
 
+#### `ToolSchema` (TypedDict, `api/provider.py`) — one tool definition as the model sees it
+
+| Key | Type | Meaning |
+|---|---|---|
+| `name` | `str` | Tool name the model calls |
+| `description` | `str` | Model-facing description |
+| `input_schema` | `dict[str, Any]` | JSON Schema of the input (from the Pydantic model, wire-dieted) |
+
+Built by `Tool.get_tool_schema()` and passed to `LLMProvider.complete(tools=...)`; a plain dict at runtime.
+
 #### `Batch` (orchestrator-internal) — partitioning output
 
 | Field | Type | Meaning |

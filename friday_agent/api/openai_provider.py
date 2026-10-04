@@ -36,6 +36,7 @@ from friday_agent.api.provider import (
     StopReason,
     TextBlock,
     TokenUsage,
+    ToolSchema,
     ToolUseBlock,
     TransientError,
 )
@@ -107,7 +108,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         config: OpenAIConfig | None,
     ) -> AssistantResponse:
         """Execute a single completion call.
@@ -126,7 +127,7 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         self,
         messages: list[dict],
         system_prompt: str,
-        tools: list[dict],
+        tools: list[ToolSchema],
         cfg: OpenAIConfig,
     ) -> dict:
         """Build kwargs for `chat.completions.create()`."""
@@ -246,23 +247,23 @@ class OpenAIProvider(LLMProvider[OpenAIConfig]):
         return "\n".join(p for p in parts if p)
 
     @staticmethod
-    def _to_openai_tools(tools: list[dict]) -> list[dict]:
+    def _to_openai_tools(tools: list[ToolSchema]) -> list[dict]:
         """Convert internal (Anthropic-format) tool defs to OpenAI function tool format.
 
         Internal: {name, description, input_schema}
         OpenAI:   {type: "function", function: {name, description, parameters}}
         """
-        out: list[dict] = []
-        for tool in tools or []:
-            out.append({
+        return [
+            {
                 "type": "function",
                 "function": {
-                    "name": tool.get("name", ""),
-                    "description": tool.get("description", "") or "",
-                    "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
                 },
-            })
-        return out
+            }
+            for tool in tools
+        ]
 
     # -- normalize ---------------------------------------------------------
     def normalize(self, native_response) -> AssistantResponse:

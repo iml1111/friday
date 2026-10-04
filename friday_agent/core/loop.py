@@ -27,6 +27,7 @@ from friday_agent.api.provider import (
     LLMProvider,
     TextBlock,
     ThinkingBlock,
+    ToolSchema,
     ToolUseBlock,
 )
 from friday_agent.core.state import LoopState, PendingToolUseError, Suspended, Terminal
@@ -162,7 +163,7 @@ async def run_one_turn(
     *,
     provider: LLMProvider,
     tools: list[Tool],
-    tool_schemas: list[dict],
+    tool_schemas: list[ToolSchema],
     state: LoopState,
     system_prompt: str = "",
     config: LLMConfig | None = None,

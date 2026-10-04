@@ -32,11 +32,11 @@ The `api/` package consolidates three responsibilities into a single swap bounda
 
 ### LLMProvider
 
-`api/provider.py:107` — `LLMProvider(ABC, Generic[ConfigT])` enforces a single abstract method, `complete()`.
+`api/provider.py:115` — `LLMProvider(ABC, Generic[ConfigT])` enforces a single abstract method, `complete()`.
 
 | Member | Signature | Description |
 |---|---|---|
-| `complete()` | `async (messages, system_prompt, tools, config) -> AssistantResponse` | Single completion call. The adapter calls the vendor SDK and normalizes the response. |
+| `complete()` | `async (messages, system_prompt, tools: list[ToolSchema], config) -> AssistantResponse` | Single completion call. The adapter calls the vendor SDK and normalizes the response. `ToolSchema` is a `TypedDict` (`name`, `description`, `input_schema`) — a plain dict at runtime. |
 
 The class attribute `config_type: type[ConfigT]` must be set by the adapter. `FridayAgent` uses it to validate config/provider mismatches and to build the default config (`provider.config_type()`).
 
@@ -140,7 +140,7 @@ Dependency direction within the `api/` package: `anthropic_provider` / `openai_p
 
 The following invariants must be preserved when modifying adapters. See [06-invariants](06-invariants.md) for the full list.
 
-1. **No temperature with thinking** — when `AnthropicConfig.thinking_enabled=True`, the `temperature` parameter must not be sent to the API (`anthropic_provider.py:148–154`).
+1. **No temperature with thinking** — when `AnthropicConfig.thinking_enabled=True`, the `temperature` parameter must not be sent to the API (`anthropic_provider.py:149–155`).
 2. **Omit empty tools** — sending `tools=[]` to the API causes request rejection on some models. Both adapters omit the `tools` field when the list is empty.
 3. **`ContextOverflowError` propagation** — when the adapter classifies a 400 and raises, `core/loop.py` does not catch it and propagates it to the caller. The caller trims the state, runs `engine.compact(state)`, and retries. See [04-context-compaction](04-context-compaction.md) for the context compaction flow.
 4. **OpenAI argument parsing** — `_parse_arguments` returns an empty dict `{}` on JSON parse failure. When modifying the adapter, take care not to leak parse exceptions out of the loop.

@@ -55,7 +55,7 @@ Core contract:
 
 ### Execution Path — `run_tools`
 
-`orchestrator.py:173` / `core/loop.py:41,265` — the only execution path that `run_one_turn()` calls directly.
+`orchestrator.py:173` / `core/loop.py:42,266` — the only execution path that `run_one_turn()` calls directly.
 
 ```python
 # core/loop.py
@@ -133,7 +133,7 @@ To be eligible for a parallel batch, `is_concurrency_safe()` just needs to retur
 
 ### `Tool` Methods — Conservative Defaults
 
-`tools/base.py:140`
+`tools/base.py:142`
 
 | Method | Return Type | Default | Description |
 |---|---|---|---|
@@ -146,7 +146,7 @@ To be eligible for a parallel batch, `is_concurrency_safe()` just needs to retur
 
 ### `ToolResult`
 
-`tools/base.py:17`
+`tools/base.py:19`
 
 ```python
 ToolResult(
@@ -161,9 +161,9 @@ ToolResult(
 
 ---
 
-### `get_tool_schema()`
+### `get_tool_schema() -> ToolSchema`
 
-`tools/base.py` — runs the Pydantic v2 schema through the wire-diet pipeline and returns it in the form passed to the API. Since the schema resides in the prefix of every call, bytes carrying zero information for the model are removed (validation is done by the Pydantic model — this schema is purely "documentation shown to the model", so semantics are unchanged):
+`tools/base.py` — runs the Pydantic v2 schema through the wire-diet pipeline and returns it in the form passed to the API, typed as `ToolSchema` (a `TypedDict` in `api/provider.py` — a plain dict at runtime). Since the schema resides in the prefix of every call, bytes carrying zero information for the model are removed (validation is done by the Pydantic model — this schema is purely "documentation shown to the model", so semantics are unchanged):
 
 1. **`_inline_defs`** — inlines and removes `$defs`. Ensures nested models · enums (e.g. `TodoItem.status`) are exposed to the model as-is without dangling `$ref`s — otherwise only `$ref` remains and the model cannot see the enum constraint.
 2. **`_strip_titles`** — recursively removes pydantic's auto-generated cosmetic `title` (pure duplication, since the property name is already in the schema). Actual properties named `title` (dict values) are preserved.
@@ -186,7 +186,7 @@ ToolResult(
 |---|---|---|
 | Uses | `messages/types.py` | `ContentBlock`, `create_tool_result_message` |
 | Uses | `pydantic` | Input schema validation (`model_validate`, `model_json_schema`) |
-| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:41,265`) |
+| Called by | `core/loop.py` | imports · calls `run_tools` (`loop.py:42,266`) |
 
 ---
 
