@@ -145,11 +145,14 @@ class FridayAgent:
         # Per-turn content (the live memory index, then the caller's
         # turn_sections) rides messages[-1] as turn-local reminders — in the
         # system prompt it would invalidate the whole conversation cache.
-        turn_reminders = (
-            [await build_memory_reminder(self._memory)] if self._memory is not None else []
-        )
-        turn_reminders += [wrap_system_reminder(text) for text in turn_sections or [] if text]
-        turn_reminders = [t for t in turn_reminders if t]
+        turn_reminders = [
+            reminder
+            for reminder in (
+                await build_memory_reminder(self._memory) if self._memory is not None else "",
+                *(wrap_system_reminder(text) for text in turn_sections or [] if text),
+            )
+            if reminder
+        ]
         async for item in run_one_turn(
             provider=self._provider,
             tools=self._tools,
