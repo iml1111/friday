@@ -136,8 +136,9 @@ async def compact_conversation(
 
     Calls ``LLMProvider.complete()`` with ``tools=[]`` (no tool calls allowed
     during summarization), then extracts the text inside the ``<summary>`` tag.
-    The ``<analysis>`` block is discarded. If no tags are present the entire
-    response text is returned as a graceful fallback.
+    The ``<analysis>`` block is discarded. Without a usable <summary> pair (see
+    _extract_summary) the entire response text is returned as a graceful
+    fallback.
 
     Args:
         provider: LLM backend used to generate the summary.
@@ -165,10 +166,28 @@ async def compact_conversation(
         if hasattr(block, "text") and block.text:
             raw_text += block.text
 
-    if "<summary>" in raw_text and "</summary>" in raw_text:
-        start = raw_text.index("<summary>") + len("<summary>")
-        end = raw_text.index("</summary>")
-        return raw_text[start:end].strip()
+    summary = _extract_summary(raw_text)
+    if summary is not None:
+        return summary
 
-    # No structured tags — return the full response as a best-effort fallback.
+    # No usable <summary> pair — return the full response as a best-effort fallback.
     return raw_text.strip()
+
+
+def _extract_summary(raw_text: str) -> str | None:
+    """Return the text inside ``<summary>``, or None if there is no usable pair.
+
+    The closing tag is searched for only *after* the opening tag: a summarizer
+    that closes its ``<analysis>`` block with ``</summary>`` by mistake puts a
+    closing tag ahead of the real opening one, and pairing the first of each
+    yields an empty summary. An empty body is reported as a miss as well, so the
+    caller falls back instead of replacing the history with nothing.
+    """
+    start = raw_text.find("<summary>")
+    if start == -1:
+        return None
+    start += len("<summary>")
+    end = raw_text.find("</summary>", start)
+    if end == -1:
+        return None
+    return raw_text[start:end].strip() or None

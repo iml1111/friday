@@ -191,3 +191,38 @@ async def test_compact_conversation_defaults_to_base_prompt():
     await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
 
     assert provider.received_messages[0][-1]["content"] == COMPACT_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# <summary> extraction: the closing tag is searched only after the opening tag
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_compact_conversation_ignores_stray_closing_tag_before_summary():
+    """An <analysis> block closed with </summary> must not empty the summary."""
+    raw = "<analysis>notes</summary>\n<summary>REAL BODY</summary>"
+    provider = FakeLLMProvider(responses=[_summary_response(raw)])
+
+    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+
+    assert result == "REAL BODY"
+
+
+@pytest.mark.asyncio
+async def test_compact_conversation_empty_summary_falls_back_to_full_text():
+    raw = "<analysis>notes</analysis><summary>  </summary>"
+    provider = FakeLLMProvider(responses=[_summary_response(raw)])
+
+    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+
+    assert result == raw
+
+
+@pytest.mark.asyncio
+async def test_compact_conversation_unclosed_summary_falls_back_to_full_text():
+    raw = "<analysis>notes</analysis><summary>cut off mid-sentence"
+    provider = FakeLLMProvider(responses=[_summary_response(raw)])
+
+    result = await compact_conversation(provider=provider, messages=[{"role": "user", "content": "x"}])
+
+    assert result == raw
