@@ -19,7 +19,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 | Path | Responsibility | Key Symbols |
 |---|---|---|
-| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching · backfill | `run_one_turn()`, `yield_missing_tool_result_blocks()` |
+| `friday_agent/core/loop.py` | Single-turn execution · stop_reason branching | `run_one_turn()` |
 | `friday_agent/core/engine.py` | External entry point, direct provider injection, memory tool registration · section injection | `FridayAgent.step()`, `FridayAgent.compact()` |
 | `friday_agent/core/state.py` | Loop state · termination types + JSON serde | `Terminal`, `LoopState` (`to_dict`/`from_dict`) |
 
@@ -45,7 +45,7 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 4. end of turn: yield 1 sentinel (next_todos = apply_state_effects(state.todos, effects))
       LoopState              ─ loop continues (clean state.messages + next_todos)
-      Terminal               ─ loop terminates
+      Terminal               ─ loop terminates; .state = the state to persist
 ```
 
 ### Termination / Transition Branch Table
@@ -54,14 +54,14 @@ There is no while-true driver. The caller drives the loop directly by calling `s
 
 | Condition | Result |
 |---|---|
-| No tool_use (non-tool stop such as end_turn) | `Terminal(reason="completed")` |
-| `LLMError` (excluding overflow) | `Terminal(reason="model_error", error=...)` + backfill |
+| No tool_use (non-tool stop such as end_turn) | `Terminal(reason="completed", state=…)` — `state` = input + assistant message, `turn_count+1` |
+| `LLMError` (excluding overflow) | `Terminal(reason="model_error", error=..., state=…)` — `state` = the input state; retry with `step(terminal.state)` |
 | `ContextOverflowError` | **raised to the caller** (not a Terminal) — retry after `engine.compact()` |
 | Tool execution complete | `LoopState(..., turn_count+1)` |
 
-### Backfill (`yield_missing_tool_result_blocks`)
+### Final State on `Terminal`
 
-When a turn is aborted by `LLMError`, `friday_agent/core/loop.py:76` › `yield_missing_tool_result_blocks()` generates synthetic error `tool_result`s for tool_use blocks that have not yet received results, restoring integrity. See [06-invariants](06-invariants.md) for details.
+Every `Terminal` carries `state` — the state to persist. `completed`: the input state plus this turn's assistant message (`turn_count+1`, `todos` unchanged). `model_error`: the input state itself — the provider call failed before any assistant message existed, so there is nothing to add and no `tool_use` to pair; `step(terminal.state)` repeats the call. No extra `LoopState` is yielded before a `Terminal` (`LoopState` means "continue").
 
 ---
 
@@ -95,7 +95,7 @@ An **async generator** that executes one turn. It immediately yields each `Messa
 async for item in engine.step(state):
     if isinstance(item, (LoopState, Terminal)):
         outcome = item        # LoopState → next turn (use outcome as state as-is)
-                              # Terminal  → loop terminates
+                              # Terminal  → loop terminates (outcome.state = state to keep)
     else:
         render(item)          # Message: assistant response or tool_result — consumable on arrival
 ```
@@ -119,7 +119,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 | Type | Defined At | Role |
 |---|---|---|
 | `LoopState(messages, turn_count=1, todos=[])` | `core/state.py:34` | Serializable loop transport unit + turn-boundary "continue" resume sentinel |
-| `Terminal(reason, error=None)` | `core/state.py:19` | Loop termination sentinel |
+| `Terminal(reason, error=None, state=None)` | `core/state.py:19` | Loop termination sentinel; `state` is always set by the loop |
 
 ---
 
@@ -142,7 +142,7 @@ See [04-context-compaction](04-context-compaction.md) for details.
 - **General behavior block auto-injection.** `run_one_turn()` **always** injects `GENERAL_AGENT_GUIDANCE` (prompt-injection flagging · meaning of `<system-reminder>` · reversibility of actions · conciseness, etc.) **before** the caller's `system_prompt` when sending (`assemble_system_prompt()`). Order is general→specific — the domain prompt comes last so its rules override the general guidance via recency. There is no opt-out flag. The compaction summary call (`engine.compact()`) does not go through this path, so the general block does not leak into the summary.
 - **TodoWrite tool · guidance auto-injection (built-in).** `FridayAgent` always merges the tools from `builtin_tools()` (`tools/builtin/__init__.py`) into the caller's tools, and `assemble_system_prompt()` always appends `TODO_GUIDANCE` (no opt-out). If the caller injects a tool with the same name as a built-in, `FridayAgent.__init__` rejects it with `ValueError`. The compaction summary does not go through this prompt path, so `TODO_GUIDANCE` does not leak into the summary.
 - **Memory prompt injection (opt-in, static/dynamic split).** Only when a `memory=` store is mounted: `engine.step()` places the static instructions `MEMORY_INSTRUCTIONS` before the base system prompt (general→specific, byte-stable within a session), and renders the live index every turn via `build_memory_reminder(self._memory)`, carrying it as a turn-local reminder (`turn_reminders` path) on `messages[-1]` only. With `memory=None` (default), this entire path is skipped. `compact()` does not go through this path, so the memory index does not leak into the summary. `MemoryStore` is not serialized into `LoopState` (container-local re-injection), so distributed-resume serde is unchanged. From the prompt caching (always-on) perspective: even when `memory_save`/`delete` changes the index, the system prefix · conversation history caches survive — only the reminder block outside the breakpoints changes (putting the index in system would invalidate the whole conversation cache on a single save). See [08-memory](08-memory.md) for details.
-- **`tool_use↔tool_result` pair preservation.** On the `LLMError` path, backfill (`yield_missing_tool_result_blocks`) kicks in to prevent LLM API rejection. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
+- **`tool_use↔tool_result` pair preservation.** `run_tools()` emits exactly one `tool_result` per executed `tool_use` (unknown tools and exceptions become error results), and the only error path (`LLMError` from the provider call) fires before an assistant message exists — so no unpaired `tool_use` is ever persisted. If this invariant breaks, the next API call fails immediately. See [06-invariants](06-invariants.md) for details.
 - **Loop state is updated only at clean turn boundaries.** `LoopState` is yielded only after all tool results are collected, so no intermediate state is lost on serialization · resume.
 - **serde does not serialize provider · config.** `LoopState.to_dict()` / `LoopState.from_dict()` round-trip only messages + turn_count + todos. provider · config are treated as container-local objects and re-injected on resume.
 - **Per-turn reminders are non-persistent.** Every turn, `run_one_turn()` uses `with_turn_reminders()` to merge `<system-reminder>` blocks (todo reminder + caller-provided `turn_reminders`) into the last user turn of an **API-view-only copy (`api_input_messages`)** and sends it. The next `LoopState` is assembled from the reminder-free `state_messages`, so reminders do not accumulate in state and are deterministically regenerated from sources such as `todos` on distributed resume. `engine.compact()` also carries `todos` forward (the summary is prose, todos are structured state). Cache invariant: all per-turn varying text is carried only on `messages[-1]` — everything up to `messages[-2]` must be byte-stable for the provider's rolling breakpoint to keep hitting.

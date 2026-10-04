@@ -188,7 +188,7 @@ ToolResult(
 
 **Result order invariant** — even with parallel execution, `run_tools` returns results **in tool_use block input order** (see [06-invariants](06-invariants.md)). `asyncio.gather` guarantees argument order, so adding reordering code is prohibited.
 
-**Backfill of incomplete tool_use** — on error paths, the tool_result corresponding to some tool_use blocks may be missing. Backfill in this case is **handled by `yield_missing_tool_result_blocks()` in `core/loop.py`**. The orchestrator does not bear this responsibility.
+**Pairing on error paths** — `run_tools()` emits exactly one `tool_result` per executed `tool_use`: unknown tools and exceptions become error results, never a gap. The loop's only error path (`LLMError` from the provider call) fires before an assistant message exists, so no `tool_use` is ever left without its `tool_result` (see [06-invariants](06-invariants.md)).
 
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.

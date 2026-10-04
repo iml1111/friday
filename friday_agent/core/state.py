@@ -22,9 +22,15 @@ class Terminal:
     reason values:
       'completed'    — normal end-turn exit
       'model_error'  — API or network error
+
+    state is the state to persist, always set by the loop: for 'completed', the
+    input state plus this turn's assistant message (turn_count + 1); for
+    'model_error', the input state itself — step(terminal.state) repeats the
+    failed call.
     """
     reason: str
     error: Exception | None = None
+    state: LoopState | None = None
 
 
 # ---------------------------------------------------------------------------

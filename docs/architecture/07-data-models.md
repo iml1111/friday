@@ -72,6 +72,7 @@ Non-serializable runtime objects such as provider and config are intentionally e
 |---|---|---|
 | `reason` | `str` | Termination reason |
 | `error` | `Exception \| None` | Error object (on model_error) |
+| `state` | `LoopState \| None` | State to persist — `completed`: input + assistant message (`turn_count+1`); `model_error`: the input state. Always set by the loop |
 
 > **Note**: `run_one_turn()` emits two reasons: `completed` and `model_error`. Context overflow is not a Terminal; it is raised to the caller as `ContextOverflowError`.
 

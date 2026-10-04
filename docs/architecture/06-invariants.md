@@ -10,7 +10,7 @@
 
 | Invariant | Why (if broken) | Guaranteed at |
 |---|---|---|
-| Every `tool_use` has a matching `tool_result` | LLM API rejects the request | `core/loop.py:76` `yield_missing_tool_result_blocks()` — on `LLMError`, backfills synthetic error `tool_result`s for incomplete blocks → [01-core-loop](01-core-loop.md) |
+| Every `tool_use` has a matching `tool_result` | LLM API rejects the request | `core/loop.py` `run_one_turn()` — `run_tools()` emits exactly one `tool_result` per executed `tool_use` (unknown tools and exceptions become error results); the only error path (`LLMError` from the provider call) fires before an assistant message exists, so no unpaired `tool_use` is ever persisted → [01-core-loop](01-core-loop.md) |
 | Results keep the original `tool_use` block order even under parallel execution | Breaks pair matching and reproducibility | `tools/orchestrator.py:144` `run_tools()` — `asyncio.gather` returns results in argument order, so block order is preserved regardless of completion order → [02-tool-orchestration](02-tool-orchestration.md) |
 | `tool_result` message `role="user"`, first message `user`, user/assistant alternation | API rejects on role-rule violation | `messages/types.py:91·105` — `create_tool_result_message()`·`create_user_message()` create with `role="user"`; `messages/normalize.py` — passes the role tag through as-is during API serialization → [05-messages](05-messages.md) |
 | `step()` sends the entire `state.messages` to the API (window management = caller) | Arbitrary truncation loses context | `core/loop.py:216` — passes the whole `api_input_messages = with_turn_reminders(list(state_messages), …)` (only appends turn-local reminders, no truncation); overflow propagates to the caller as `ContextOverflowError` → `engine.compact()` retry → [01-core-loop](01-core-loop.md)·[04-context-compaction](04-context-compaction.md) |
@@ -25,7 +25,7 @@
 
 For the detailed implementation of each invariant, see the owning subsystem doc:
 
-- **[01-core-loop](01-core-loop.md)** — `run_one_turn()`, `yield_missing_tool_result_blocks()`, caller-driven compaction flow
+- **[01-core-loop](01-core-loop.md)** — `run_one_turn()`, caller-driven compaction flow
 - **[02-tool-orchestration](02-tool-orchestration.md)** — `run_tools()` parallel execution · order preservation
 - **[03-llm-providers](03-llm-providers.md)** — `_build_params()` thinking/temperature mutual exclusion, empty tools handling, `_apply_cache_control()` cache breakpoint placement
 - **[04-context-compaction](04-context-compaction.md)** — `ContextOverflowError` propagation, `engine.compact()` retry contract

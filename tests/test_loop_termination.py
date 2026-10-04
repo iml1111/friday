@@ -1,8 +1,8 @@
-"""Termination points and tool_result backfill tests.
+"""Termination points and tool_use<->tool_result pairing tests.
 
 Verifies the agent-loop exit paths (model_error, context overflow) and the
-pairing invariant: every tool_use block in the final assistant message must have
-a matching synthetic tool_result when the loop exits without executing the tools.
+pairing invariant: every tool_use yielded before the loop exits has a matching
+tool_result — the error paths fire before any assistant message exists.
 """
 import pytest
 
@@ -101,12 +101,12 @@ async def test_model_error_generic_llm_error():
 
 
 @pytest.mark.asyncio
-async def test_model_error_after_tool_use_backfills():
-    """Pairing invariant holds when model_error fires on the turn after a completed tool call.
+async def test_model_error_after_tool_use_keeps_pairing():
+    """Pairing holds when model_error fires on the turn after a completed tool call.
 
     Turn 1: tool_use(t1) is executed and its tool_result is produced.
-    Turn 2: API raises an error — the previous assistant message carried no pending
-    tool_use, so there is nothing to backfill. Zero unmatched tool_use ids.
+    Turn 2: the API raises — the error precedes any assistant message, so every
+    tool_use yielded so far already has its tool_result.
     """
     fake = FakeLLMProvider(
         responses=[_tool_use_response("t1")],

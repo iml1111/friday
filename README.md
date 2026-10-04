@@ -111,7 +111,7 @@ while True:
     state = outcome                             # next turn (use the LoopState as-is)
 ```
 
-If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`.
+If the last item received is a `Terminal`, stop the loop. `terminal.reason` is one of `completed` / `model_error`, and `terminal.state` is the state to keep — append the next user message to it to continue the conversation, or pass it to `step()` again to retry a `model_error`.
 
 ### Injecting Domain Requirements into Compaction (opt-in)
 

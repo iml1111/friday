@@ -1,15 +1,16 @@
 """run_one_turn() — a single iteration of the agent loop.
 
-Executes one turn: calls the provider, emits assistant messages, runs tool_use
-blocks, and feeds tool_result back. On a context overflow the provider's
-ContextOverflowError propagates to the caller (caller-owned compaction); on any
-error path, unfinished tool_use blocks receive a synthetic error
-tool_result so the tool_use<->tool_result pairing stays valid.
+Executes one turn: calls the provider, emits the assistant message, runs its
+tool_use blocks, and feeds the tool_results back. On a context overflow the
+provider's ContextOverflowError propagates to the caller (caller-owned
+compaction). The only other error path — an LLMError from the provider call —
+fires before any assistant message exists, so no tool_use is ever left unpaired.
 
-A turn ends by yielding exactly one sentinel: Terminal (loop done) or the next
-LoopState (loop may continue). The caller drives the turn loop by calling
-run_one_turn() in a while-true, advancing state on each LoopState until a Terminal
-appears — there is no batch driver and no internal compaction.
+A turn ends by yielding exactly one sentinel: Terminal (loop done; carries the
+state to persist) or the next LoopState (loop may continue). The caller drives
+the turn loop by calling run_one_turn() in a while-true, advancing state on each
+LoopState until a Terminal appears — there is no batch driver and no internal
+compaction.
 """
 from __future__ import annotations
 
@@ -32,7 +33,6 @@ from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import (
     ContentBlock,
     Message,
-    create_tool_result_message,
     create_user_message,
     wrap_system_reminder,
 )
@@ -71,45 +71,6 @@ def _to_assistant_message(response: AssistantResponse) -> Message:
 def _extract_tool_use_blocks(message: Message) -> list[ContentBlock]:
     """Return all tool_use ContentBlocks from an assistant Message."""
     return [block for block in message.content if block.type == "tool_use"]
-
-
-def yield_missing_tool_result_blocks(
-    tool_use_blocks: list[ContentBlock],
-    emitted_results: list[Message],
-    error_text: str,
-) -> list[Message]:
-    """Return synthetic error tool_result messages for any unfinished tool_use blocks.
-
-    The LLM API requires that every tool_use block in the preceding assistant message
-    has a matching tool_result in the next user message. When a turn is interrupted
-    (on error) before all tools have run, this function backfills the missing
-    entries so the pairing invariant is preserved and the next API call is not rejected.
-
-    Args:
-        tool_use_blocks: All tool_use blocks from the current assistant message.
-        emitted_results: tool_result messages already yielded in this turn.
-        error_text: Error string to embed in each synthetic tool_result.
-
-    Returns:
-        A list of synthetic error tool_result Messages for every unmatched tool_use.
-    """
-    emitted_ids = {
-        block.tool_use_id
-        for msg in emitted_results
-        for block in msg.content
-        if block.type == "tool_result" and block.tool_use_id
-    }
-    backfilled: list[Message] = []
-    for block in tool_use_blocks:
-        if block.id and block.id not in emitted_ids:
-            backfilled.append(
-                create_tool_result_message(
-                    tool_use_id=block.id,
-                    result_text=error_text,
-                    is_error=True,
-                )
-            )
-    return backfilled
 
 
 def apply_state_effects(todos: list[dict], effects: list[dict]) -> list[dict]:
@@ -178,7 +139,8 @@ async def run_one_turn(
     """Execute a single turn of the agent loop.
 
     Yields all Messages produced in this turn, then yields exactly one sentinel:
-      - Terminal: loop ends (completed / model_error).
+      - Terminal: loop ends (completed / model_error); Terminal.state is the
+        state to persist.
       - LoopState: loop continues (next_turn) — the updated state for the next turn.
 
     Args:
@@ -204,24 +166,16 @@ async def run_one_turn(
     """
     config = config or provider.config_type()
 
-    state_messages = state.messages
-    turn_count = state.turn_count
-
     # API view only (turn-local, never persisted): inject the live todo reminder
     # and any caller-supplied turn reminders (e.g. memory index) so the model
     # sees current state without it entering the durable history. The next
-    # LoopState is assembled from the CLEAN state_messages below (no reminder leak).
+    # state is assembled from the CLEAN state.messages below (no reminder leak).
     reminder_texts = [render_todo_reminder(state.todos)] if state.todos else []
     reminder_texts.extend(turn_reminders or [])
-    api_input_messages = with_turn_reminders(list(state_messages), reminder_texts)
+    api_input_messages = with_turn_reminders(list(state.messages), reminder_texts)
 
     # Assemble the full system prompt for this turn.
     full_system_prompt = assemble_system_prompt(system_prompt)
-
-    assistant_messages: list[Message] = []
-    tool_results: list[Message] = []
-    tool_use_blocks: list[ContentBlock] = []
-    needs_follow_up = False
 
     # Call the LLM.
     api_messages = normalize_for_api(api_input_messages)
@@ -236,41 +190,42 @@ async def run_one_turn(
         # Caller-owned compaction: propagate so the caller can compact and retry.
         raise
     except LLMError as error:
-        for backfill_msg in yield_missing_tool_result_blocks(tool_use_blocks, tool_results, str(error)):
-            yield backfill_msg
-        yield Terminal(reason="model_error", error=error)
+        # The call failed before any assistant message existed: nothing to pair,
+        # nothing to add. The input state is the state to persist (and retry).
+        yield Terminal(reason="model_error", error=error, state=state)
         return
 
     # Convert the response to an internal Message and yield it.
     message = _to_assistant_message(response)
-    assistant_messages.append(message)
     yield message
 
-    msg_tool_use_blocks = _extract_tool_use_blocks(message)
-    if msg_tool_use_blocks:
-        tool_use_blocks.extend(msg_tool_use_blocks)
-        needs_follow_up = True
+    tool_use_blocks = _extract_tool_use_blocks(message)
 
     # Termination point: no tool_use blocks — the model is done.
-    if not needs_follow_up:
-        yield Terminal(reason="completed")
+    if not tool_use_blocks:
+        yield Terminal(
+            reason="completed",
+            state=LoopState(
+                messages=[*state.messages, message],
+                turn_count=state.turn_count + 1,
+                todos=state.todos,
+            ),
+        )
         return
 
     # Execute all tool_use blocks, collecting results and declarative state effects.
     effects: list[dict] = []
+    tool_results: list[Message] = []
     async for result_msg in run_tools(
         tool_use_blocks, tools, max_concurrency=max_concurrency, effects_sink=effects
     ):
         tool_results.append(result_msg)
         yield result_msg
 
-    next_turn_count = turn_count + 1
-    next_todos = apply_state_effects(state.todos, effects)
-
-    # Continuation: assemble the next-turn LoopState from the CLEAN state_messages
+    # Continuation: assemble the next-turn LoopState from the CLEAN state.messages
     # (NOT api_input_messages) so the turn-local reminder is never persisted.
     yield LoopState(
-        messages=[*state_messages, *assistant_messages, *tool_results],
-        turn_count=next_turn_count,
-        todos=next_todos,
+        messages=[*state.messages, message, *tool_results],
+        turn_count=state.turn_count + 1,
+        todos=apply_state_effects(state.todos, effects),
     )

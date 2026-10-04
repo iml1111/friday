@@ -63,7 +63,7 @@ Caller consumes via `async for`: if the last sentinel is a LoopState, call step(
 
 Core data structures (`docs/architecture/01-core-loop.md`·`05-messages.md`):
 - **`Message` + `ContentBlock`** — there is no separate *Message class union. Just a single `Message` dataclass (`type` tag: `user`/`assistant`/`system`) with flag fields (`is_compact_summary`/`is_meta`/`is_api_error_message`). Blocks are likewise represented by a single flat `ContentBlock` dataclass (`type`: `text`/`tool_use`/`tool_result`/`thinking`).
-- **Terminal** — the loop termination reasons **that `run_one_turn` actually emits** (`completed`, `model_error`). Context overflow propagates to the caller as `ContextOverflowError`, so there is no `prompt_too_long` termination reason. "Continue" at a turn boundary is expressed by emitting the `LoopState` as-is (in contrast to `Terminal`).
+- **Terminal** — the loop termination reasons **that `run_one_turn` actually emits** (`completed`, `model_error`). Context overflow propagates to the caller as `ContextOverflowError`, so there is no `prompt_too_long` termination reason. Every `Terminal` carries `state` — the state to persist (`completed`: input + assistant message; `model_error`: the input state, retried with `step(terminal.state)`). "Continue" at a turn boundary is expressed by emitting the `LoopState` as-is (in contrast to `Terminal`).
 - **LoopState** (implementation) — the serializable loop state (messages·turn_count) and also the turn-boundary "continue" resume sentinel. It is the transport unit for distributed resume and owns its own JSON serde (`to_dict()`/`from_dict()`) (`core/state.py`·`messages/types.py`). The transport unit is `json.dumps(loopstate.to_dict())`.
 
 ## Implementation Scope Charter (must follow)
