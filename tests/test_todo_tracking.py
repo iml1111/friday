@@ -199,7 +199,7 @@ async def test_reminder_never_leaks_into_persisted_state():
     assert isinstance(outcome, LoopState)
     # The API saw the reminder...
     assert "<system-reminder>" in _api_text(fake.received_messages[0])
-    # ...but the persisted next state did NOT (built from clean state_messages).
+    # ...but the persisted next state did NOT (built from clean state.messages).
     persisted = " ".join(b.text or "" for m in outcome.messages for b in m.content if b.type == "text")
     assert "<system-reminder>" not in persisted
     # ExampleTool emits no effect -> todos carried forward unchanged.
