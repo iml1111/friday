@@ -146,8 +146,10 @@ class Tool(ABC):
 
         A deferred call is not executed by step(): the turn ends with
         Suspended(state, pending) and the caller attaches the result later with
-        resume(). call() still runs for calls this returns False for — including
-        calls whose input fails schema validation, which are never deferred.
+        resume(). If this raises on valid input, the call is held as deferred
+        (fail closed). call() still runs for calls this returns False for —
+        including calls whose input fails schema validation, which are never
+        deferred and reach call() raw, so call() must validate its input.
         """
         return False
 

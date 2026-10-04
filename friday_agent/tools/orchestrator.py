@@ -64,10 +64,12 @@ def _is_concurrency_safe(tool: Tool, block: ContentBlock) -> bool:
 def is_deferred_call(block: ContentBlock, tools: list[Tool]) -> bool:
     """Return whether a tool_use block is held back for an external result.
 
-    Evaluated like concurrency safety: an unknown tool, input that fails schema
-    validation, and a raising predicate all count as not deferred — such a call
-    runs inline and the model gets an immediate error, instead of an external
-    executor receiving a malformed call.
+    An unknown tool and input that fails schema validation count as not
+    deferred: such a call runs inline — call() receives the raw input, and its
+    own validation turns it into an immediate error for the model — instead of
+    an external executor receiving a malformed call. A predicate that raises on
+    valid input counts as deferred: a gate fails closed, so a well-formed call
+    waits for its external result rather than running unchecked.
     """
     tool = _find_tool(tools, block.name or "")
     if tool is None:
@@ -78,7 +80,7 @@ def is_deferred_call(block: ContentBlock, tools: list[Tool]) -> bool:
     try:
         return bool(tool.is_deferred(parsed))
     except Exception:
-        return False
+        return True  # fail closed: hold the call rather than run it past a broken gate
 
 
 def partition_tool_calls(

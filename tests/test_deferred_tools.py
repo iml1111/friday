@@ -203,6 +203,24 @@ async def test_invalid_input_to_deferred_tool_runs_inline_with_error():
 
 
 @pytest.mark.asyncio
+async def test_raising_predicate_on_valid_input_fails_closed():
+    """A gate that crashes on a well-formed call holds it instead of running it unchecked."""
+
+    class BrokenGate(Approval):
+        def is_deferred(self, input: dict) -> bool:
+            raise RuntimeError("threshold lookup failed")
+
+    tool = BrokenGate()
+    fake = FakeLLMProvider(responses=[_calls(_approval("a1"))])
+
+    _, outcome = await collect_turn(FridayAgent(provider=fake, tools=[tool]), _start())
+
+    assert isinstance(outcome, Suspended)
+    assert tool.calls == 0
+    assert [b.id for b in outcome.pending] == ["a1"]
+
+
+@pytest.mark.asyncio
 async def test_unknown_tool_beside_deferred_errors_immediately():
     unknown = ToolUseBlock(id="u1", name="nope", input={})
     fake = FakeLLMProvider(responses=[_calls(_approval("a1"), unknown)])

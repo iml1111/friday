@@ -49,7 +49,7 @@ Core contract:
 
 **concurrency-safe determination**: whether a block goes into a parallel batch is **decided solely by `is_concurrency_safe()`**. `_is_concurrency_safe()` (`orchestrator.py:48–61`) calls only `tool.is_concurrency_safe()` after schema validation passes (`orchestrator.py:59`). That is, returning `is_concurrency_safe() → True` is all it takes to become eligible for parallel execution. The default is `False`, so without an explicit override the tool runs sequentially.
 
-**Deferred calls**: before partitioning, `run_one_turn` holds back every call for which `is_deferred_call()` is true — the tool's `is_deferred(input)` after the same conservative checks (unknown tool, `None` or invalid input, or a raising predicate → not deferred, so the call runs inline and the model gets an immediate error). Only the remaining calls are partitioned and run; the deferred ones end the turn as `Suspended` ([01-core-loop](01-core-loop.md)).
+**Deferred calls**: before partitioning, `run_one_turn` holds back every call for which `is_deferred_call()` is true — the tool's `is_deferred(input)` after schema validation. An unknown tool or `None`/invalid input → not deferred: the call runs inline, and `call()` — which receives the raw input and must validate it — turns it into an immediate error for the model. A predicate that raises on valid input → deferred, so a broken gate fails closed instead of running the call unchecked. Only the remaining calls are partitioned and run; the deferred ones end the turn as `Suspended` ([01-core-loop](01-core-loop.md)).
 
 ---
 
@@ -199,7 +199,7 @@ ToolResult(
 
 **`is_concurrency_safe` conservative default** — when you write a new tool, the default is `False`, so parallel batches are not formed unintentionally. If you want parallel execution, you must explicitly override `is_concurrency_safe()` to return `True` — partitioning consults only this single predicate.
 
-**`is_deferred` conservative default** — `False` unless overridden. A deferred tool's `call()` still runs for calls that are not deferred (for example, invalid input), so make it return a clear error result in that case.
+**`is_deferred` defaults** — `False` unless overridden; a predicate that raises on valid input counts as deferred (fail closed). A deferred tool's `call()` still runs for every call that is not deferred — including input that fails validation, which it receives raw — so validate `args` in `call()` (e.g. `Input(**args)`): the exception becomes an error result for the model, while valid non-deferred calls do the real work.
 
 **Built-in tool auto-registration** — `FridayAgent` always merges the tools returned by `builtin_tools()` (`friday_agent/tools/builtin/__init__.py`) (currently `TodoWrite`) after the caller's tools. If the caller passes a tool with a clashing name, `__init__` rejects it with `ValueError` (the LLM API rejects duplicate tool names, so integrity is kept via explicit rejection rather than silent dedupe). Injection happens only at the engine boundary, so the orchestrator · loop remain unaware of tool names. In addition, when a store is mounted via `memory=` (opt-in), that `MemoryStore`'s `tools()` (default `memory_save`/`memory_read`/`memory_delete`) are also registered, and if a caller tool's name clashes with a built-in or memory tool name, `__init__` rejects it with `ValueError` (uniqueness check across all tool names).
 

@@ -367,7 +367,7 @@ from friday_agent.core.state import Suspended
 class SendEmail(Tool):
     ...
     def is_deferred(self, input: dict) -> bool:
-        return True                                   # step() will not run it
+        return True                                   # step() holds every valid call
 
 # Request handler — the turn ends with Suspended
 async for item in engine.step(state):
@@ -384,3 +384,5 @@ save(json.dumps(state.to_dict()))                     # then run the next turn w
 ```
 
 Calling `step()` on a state that still has unanswered calls raises `PendingToolUseError` before any request.
+
+`call()` is the inline fallback: it still runs for calls that are not deferred — including input that fails schema validation, which it receives raw — so validate `args` in `call()` as in the tool guide above. If `is_deferred()` raises on valid input, the call is held anyway (fail closed).
