@@ -44,21 +44,13 @@ def test_fully_answered_turn_has_nothing_pending():
 @pytest.mark.asyncio
 async def test_step_rejects_pending_state_before_anything_runs():
     fake = FakeLLMProvider(responses=[])
-    rendered: list[LoopState] = []
-
-    async def section(state: LoopState) -> str:
-        rendered.append(state)
-        return "S"
-
-    engine = FridayAgent(provider=fake, turn_sections=[section])
     state = LoopState(messages=[create_user_message("hi"), _assistant_calls("a", "b")])
 
     with pytest.raises(PendingToolUseError) as exc:
-        await collect_turn(engine, state)
+        await collect_turn(FridayAgent(provider=fake), state, ["S"])
 
     assert exc.value.tool_use_ids == ["a", "b"]
     assert fake.call_count == 0
-    assert rendered == []
 
 
 @pytest.mark.asyncio

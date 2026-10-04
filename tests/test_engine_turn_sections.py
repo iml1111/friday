@@ -1,4 +1,4 @@
-"""FridayAgent(turn_sections=...) — per-turn sections ride messages[-1] only."""
+"""engine.step(state, turn_sections=[...]) — per-turn sections ride messages[-1] only."""
 import pytest
 
 from friday_agent.api.provider import AssistantResponse, StopReason, TextBlock, TokenUsage, ToolUseBlock
@@ -27,31 +27,26 @@ def _texts(api_message: dict) -> list[str]:
     return [b.get("text", "") for b in api_message["content"] if b.get("type") == "text"]
 
 
-async def _turns_section(state: LoopState) -> str:
-    return f"SECTION turns={state.turn_count}"
-
-
 @pytest.mark.asyncio
 async def test_section_rides_last_user_message_wrapped_as_reminder():
     fake = FakeLLMProvider(responses=[_text()])
-    engine = FridayAgent(provider=fake, turn_sections=[_turns_section])
 
-    await collect_turn(engine, LoopState(messages=[create_user_message("hi")], turn_count=7))
+    await collect_turn(FridayAgent(provider=fake), LoopState(messages=[create_user_message("hi")]), ["SECTION"])
 
     last = fake.received_messages[0][-1]
     assert last["role"] == "user"
     texts = _texts(last)
     assert texts[0] == "hi"
     assert texts[1].startswith(SYSTEM_REMINDER_PREFIX)
-    assert "SECTION turns=7" in texts[1]  # the section received the input state
+    assert "SECTION" in texts[1]
 
 
 @pytest.mark.asyncio
 async def test_section_never_persisted():
     fake = FakeLLMProvider(responses=[_tool_call("t1")])
-    engine = FridayAgent(provider=fake, tools=[ExampleTool()], turn_sections=[_turns_section])
+    engine = FridayAgent(provider=fake, tools=[ExampleTool()])
 
-    _, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("hi")]))
+    _, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("hi")]), ["SECTION"])
 
     assert isinstance(outcome, LoopState)
     assert "SECTION" not in str(outcome.to_dict())
@@ -64,19 +59,17 @@ async def test_without_sections_request_is_unchanged():
     state = LoopState(messages=[create_user_message("hi")])
 
     await collect_turn(FridayAgent(provider=default), state)
-    await collect_turn(FridayAgent(provider=empty, turn_sections=[]), state)
+    await collect_turn(FridayAgent(provider=empty), state, [])
 
     assert default.received_messages[0] == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
     assert empty.received_messages[0] == default.received_messages[0]
 
 
 @pytest.mark.asyncio
-async def test_empty_section_output_is_dropped():
-    async def silent(state: LoopState) -> str:
-        return ""
-
+async def test_empty_section_is_dropped():
     fake = FakeLLMProvider(responses=[_text()])
-    await collect_turn(FridayAgent(provider=fake, turn_sections=[silent]), LoopState(messages=[create_user_message("hi")]))
+
+    await collect_turn(FridayAgent(provider=fake), LoopState(messages=[create_user_message("hi")]), [""])
 
     assert _texts(fake.received_messages[0][-1]) == ["hi"]
 
@@ -86,17 +79,11 @@ async def test_order_todo_then_memory_then_sections():
     store = InMemoryStore()
     await store.save(MemoryEntry(name="pref", description="likes tea", type=MemoryType.user, body="tea"))
 
-    async def first(state: LoopState) -> str:
-        return "FIRST"
-
-    async def second(state: LoopState) -> str:
-        return "SECOND"
-
     fake = FakeLLMProvider(responses=[_text()])
-    engine = FridayAgent(provider=fake, memory=store, turn_sections=[first, second])
+    engine = FridayAgent(provider=fake, memory=store)
     state = LoopState(messages=[create_user_message("hi")], todos=[{"content": "a", "status": "pending"}])
 
-    await collect_turn(engine, state)
+    await collect_turn(engine, state, ["FIRST", "SECOND"])
 
     joined = "\n".join(_texts(fake.received_messages[0][-1]))
     assert (
@@ -108,37 +95,32 @@ async def test_order_todo_then_memory_then_sections():
 
 
 @pytest.mark.asyncio
+async def test_sections_are_chosen_per_call():
+    """Each step() call carries only the sections passed to it — the caller can
+    include a section on one call and omit it on the next."""
+    fake = FakeLLMProvider(responses=[_tool_call("t1"), _text()])
+    engine = FridayAgent(provider=fake, tools=[ExampleTool()])
+
+    _, state = await collect_turn(engine, LoopState(messages=[create_user_message("hi")]), ["ONLY-FIRST"])
+    await collect_turn(engine, state)
+
+    first, second = fake.received_messages
+    assert "ONLY-FIRST" in str(first[-1])
+    assert "ONLY-FIRST" not in str(second)
+
+
+@pytest.mark.asyncio
 async def test_cache_prefix_stable_across_turns():
     """Everything before messages[-1] is byte-identical turn to turn."""
-    ticks = {"n": 0}
-
-    async def ticker(state: LoopState) -> str:
-        ticks["n"] += 1
-        return f"tick {ticks['n']}"
-
     fake = FakeLLMProvider(responses=[_tool_call("t1"), _tool_call("t2"), _text()])
-    engine = FridayAgent(provider=fake, tools=[ExampleTool()], turn_sections=[ticker])
+    engine = FridayAgent(provider=fake, tools=[ExampleTool()])
 
     state = LoopState(messages=[create_user_message("hi")])
-    _, state = await collect_turn(engine, state)
-    _, state = await collect_turn(engine, state)
-    await collect_turn(engine, state)
+    _, state = await collect_turn(engine, state, ["tick 1"])
+    _, state = await collect_turn(engine, state, ["tick 2"])
+    await collect_turn(engine, state, ["tick 3"])
 
     _, second, third = fake.received_messages
     assert third[: len(second) - 1] == second[:-1]  # messages[-2] and earlier unchanged
     assert "tick 2" not in str(third)  # last turn's section did not persist
     assert "tick 3" in str(third[-1])
-
-
-@pytest.mark.asyncio
-async def test_section_exception_propagates():
-    async def broken(state: LoopState) -> str:
-        raise RuntimeError("section failed")
-
-    fake = FakeLLMProvider(responses=[_text()])
-    with pytest.raises(RuntimeError, match="section failed"):
-        await collect_turn(
-            FridayAgent(provider=fake, turn_sections=[broken]),
-            LoopState(messages=[create_user_message("hi")]),
-        )
-    assert fake.call_count == 0

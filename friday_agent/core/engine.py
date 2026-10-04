@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import copy
 from collections import Counter
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import AsyncGenerator
 
 from friday_agent.api.prompts import assemble_system_prompt, format_compact_prompt, format_compact_summary_message
 from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolUseBlock
@@ -26,12 +26,6 @@ from friday_agent.messages.normalize import normalize_for_api
 from friday_agent.messages.types import Message, create_user_message, wrap_system_reminder
 from friday_agent.tools.base import Tool
 from friday_agent.tools.builtin import builtin_tools
-
-# A per-turn section: rendered from the turn's input state on every step();
-# its output rides the trailing user message as a <system-reminder> (never
-# persisted, never part of the cached prefix).
-TurnSection = Callable[[LoopState], Awaitable[str]]
-
 
 class FridayAgent:
     """External entry point for the agent loop.
@@ -59,14 +53,6 @@ class FridayAgent:
                 preserve. (system_prompt also reaches that call, but only as
                 the shared cached prefix, ahead of the compact prompt.)
                 Empty (the default) leaves the base prompt untouched.
-        turn_sections: Async callables rendered on every step() from the turn's
-                input state. Each non-empty output is wrapped in a
-                <system-reminder> and joined onto the trailing user message of
-                the API view only (after the todo reminder and the memory
-                index) — never persisted into LoopState, never part of the
-                cached prefix. Use for content that changes during a session
-                (current screen, progress); static content belongs in
-                system_prompt. Empty strings are dropped; exceptions propagate.
 
     Raises:
         ValueError: When config is given but its type does not match the
@@ -82,7 +68,6 @@ class FridayAgent:
         max_concurrency: int = 10,
         memory: MemoryStore | None = None,
         compact_instructions: str = "",
-        turn_sections: list[TurnSection] | None = None,
     ) -> None:
         # Confirm config type matches the provider; fall back to the provider's default if None.
         if config is None:
@@ -111,7 +96,6 @@ class FridayAgent:
         self._config = config
         self._max_concurrency = max_concurrency
         self._compact_instructions = compact_instructions
-        self._turn_sections = list(turn_sections or [])
 
     def _effective_system_prompt(self) -> str:
         """Static system prefix: memory instructions (when mounted) -> domain prompt.
@@ -125,7 +109,9 @@ class FridayAgent:
     def _tool_schemas(self) -> list[dict]:
         return [tool.get_tool_schema() for tool in self._tools]
 
-    async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]:
+    async def step(
+        self, state: LoopState, turn_sections: list[str] | None = None
+    ) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
 
         Yields every Message emitted during the turn (assistant response, then each
@@ -139,9 +125,19 @@ class FridayAgent:
         the sole entry point for both starting and resuming. Distributed resume is
         unchanged: serialize the final LoopState directly.
 
+        Args:
+            state: The turn's input state.
+            turn_sections: Per-turn context for this call only (current screen,
+                progress). Each non-empty string is wrapped in a <system-reminder>
+                and joined onto the trailing user message of the API view (after
+                the todo reminder and the memory index) — never persisted into
+                LoopState, never part of the cached prefix. Pass different
+                sections (or none) on each call; static content belongs in
+                system_prompt.
+
         Raises:
             PendingToolUseError: the state still has unanswered tool_use blocks —
-                checked before anything else (no section rendered, no request sent).
+                checked before anything else (no request sent).
             ContextOverflowError: propagated from run_one_turn during iteration when the
                 provider rejects the messages as too long. The caller shrinks the
                 state and retries — compact() re-sends this same prefix, so trim
@@ -152,17 +148,14 @@ class FridayAgent:
         # System prefix: static pieces only, ordered generic -> specific
         # (memory instructions -> domain prompt) — must be byte-stable within a
         # session so the cache prefix survives. Per-turn content (the live memory
-        # index, then turn_sections outputs) is rebuilt every turn and rides
+        # index, then the caller's turn_sections) is rebuilt every turn and rides
         # messages[-1] as turn-local reminders instead — in the system prompt it
         # would invalidate the whole conversation cache.
         effective_prompt = self._effective_system_prompt()
         turn_reminders = (
             [await build_memory_reminder(self._memory)] if self._memory is not None else []
         )
-        for section in self._turn_sections:
-            text = await section(state)
-            if text:
-                turn_reminders.append(wrap_system_reminder(text))
+        turn_reminders += [wrap_system_reminder(text) for text in turn_sections or [] if text]
         turn_reminders = [t for t in turn_reminders if t]
         async for item in run_one_turn(
             provider=self._provider,
@@ -188,7 +181,7 @@ class FridayAgent:
         A reply that calls a tool or lacks a usable <summary> is retried once with
         tools=[]. compact_instructions (constructor) is the injection point for
         domain requirements about what the summary must preserve. turn_sections
-        are never rendered here.
+        (a step() argument) never reach the summary call.
 
         Args:
             state: The state to compact.

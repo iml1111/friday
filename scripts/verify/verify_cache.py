@@ -52,7 +52,7 @@ _RUN_NONCE = uuid.uuid4().hex
 _TICKS = {"n": 0}
 
 
-async def _ticker(state: LoopState) -> str:
+def _ticker() -> str:
     """A per-turn section that differs on every call (it must not break the cache)."""
     _TICKS["n"] += 1
     return f"Per-turn note {_TICKS['n']}"
@@ -94,7 +94,7 @@ async def _run_turn(engine: FridayAgent, state: LoopState):
     """Drive one engine.step() to its sentinel; return (sentinel, [messages])."""
     collected: list[Message] = []
     outcome: LoopState | Terminal | None = None
-    async for item in engine.step(state):
+    async for item in engine.step(state, turn_sections=[_ticker()]):
         if isinstance(item, (LoopState, Terminal)):
             outcome = item
         else:
@@ -148,7 +148,6 @@ async def main() -> int:
         tools=[ExampleTool()],
         system_prompt=SYSTEM_PROMPT,
         config=config,
-        turn_sections=[_ticker],
     )
 
     print(f"\nmodel         : {model}")

@@ -137,13 +137,11 @@ The summary call always sends the agent's own system prompt, tools and config, s
 
 ### Per-Turn Context (opt-in)
 
-For state that changes every turn (the current screen, progress so far), pass async sections. Each one receives the turn's input `LoopState` and returns text (`""` = nothing this turn):
+For state that changes every turn (the current screen, progress so far), pass strings to `step()`. They apply to that call only, so each call can pass different sections or none (`""` entries are dropped):
 
 ```python
-async def current_page(state):
-    return f"Current page: {browser.url}"
-
-engine = FridayAgent(provider=provider, turn_sections=[current_page])
+async for item in engine.step(state, turn_sections=[f"Current page: {browser.url}"]):
+    ...
 ```
 
 Each non-empty output is wrapped in `<system-reminder>` and attached to the last user message of that turn's request only — it is never stored in `LoopState` and never breaks the prompt cache. Static content belongs in `system_prompt`.

@@ -55,7 +55,7 @@ async def drive(
 
 
 async def collect_turn(
-    engine: FridayAgent, state: LoopState
+    engine: FridayAgent, state: LoopState, turn_sections: list[str] | None = None
 ) -> "tuple[list[Message], LoopState | Suspended | Terminal]":
     """Drain one engine.step() turn → (messages, final sentinel). Test convenience.
 
@@ -64,7 +64,7 @@ async def collect_turn(
     """
     messages: list[Message] = []
     outcome: "LoopState | Suspended | Terminal | None" = None
-    async for item in engine.step(state):
+    async for item in engine.step(state, turn_sections=turn_sections):
         if isinstance(item, (LoopState, Suspended, Terminal)):
             outcome = item
         else:

@@ -112,18 +112,13 @@ async def test_missing_summary_retries_once_without_tools():
 
 
 @pytest.mark.asyncio
-async def test_compact_never_renders_turn_sections():
-    rendered: list[int] = []
-
-    async def section(state: LoopState) -> str:
-        rendered.append(1)
-        return "PER-TURN"
-
+async def test_compact_never_sees_turn_sections():
+    """Sections passed to step() are turn-local, so the summary call never carries them."""
     fake = FakeLLMProvider(responses=[_text("hello"), _summary()])
-    engine, state = await _engine_after_one_turn(fake, turn_sections=[section])
-    rendered.clear()
+    engine = FridayAgent(provider=fake, tools=[ExampleTool()], system_prompt="DOMAIN")
+    _, outcome = await collect_turn(engine, LoopState(messages=[create_user_message("hi")]), ["PER-TURN"])
 
-    await engine.compact(state)
+    await engine.compact(outcome.state)
 
-    assert rendered == []
+    assert "PER-TURN" in str(fake.received_messages[0])
     assert "PER-TURN" not in str(fake.received_messages[1])
