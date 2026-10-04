@@ -1,7 +1,7 @@
 """Conversation summarization for caller-driven compaction."""
 from __future__ import annotations
 
-from friday_agent.api.provider import LLMProvider
+from friday_agent.api.provider import AssistantResponse, LLMProvider, ToolUseBlock
 from friday_agent.messages.types import (
     Message,
     create_user_message,
@@ -29,10 +29,12 @@ SUMMARIZER_SYSTEM_PROMPT: str = (
 # tags falls back to raw-text extraction (see compact_conversation), which silently
 # leaks the scratchpad into the summary.
 #
-# The no-tools guard appears ONCE, in the CRITICAL line. compact_conversation calls
-# complete() with tools=[] and both adapters omit the field entirely when empty, so
-# the model cannot emit a tool_use block at all; the single mention is belt-and-
-# suspenders for third-party LLMProvider implementations that ignore the argument.
+# The no-tools guard appears ONCE, in the CRITICAL line. By default
+# compact_conversation calls complete() with tools=[] and both adapters omit the
+# field entirely when empty, so the model cannot emit a tool_use block at all.
+# A caller reusing the agent's prefix (engine.compact(reuse_prefix=True)) sends
+# the agent's tools; there the CRITICAL line is the request, and a tool_use reply
+# is retried once with tools=[] (see compact_conversation).
 
 _COMPACT_PROMPT_HEAD: str = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT ask follow-up questions.
 - You already have all the context you need in the conversation above.
@@ -131,20 +133,26 @@ async def compact_conversation(
     provider: LLMProvider,
     messages: list[dict],
     extra_instructions: str = "",
+    system_prompt: str = SUMMARIZER_SYSTEM_PROMPT,
+    tools: list[dict] | None = None,
 ) -> str:
     """Summarise a conversation and return the extracted summary text.
 
-    Calls ``LLMProvider.complete()`` with ``tools=[]`` (no tool calls allowed
-    during summarization), then extracts the text inside the ``<summary>`` tag.
-    The ``<analysis>`` block is discarded. Without a usable <summary> pair (see
-    _extract_summary) the entire response text is returned as a graceful
-    fallback.
+    By default the call runs under SUMMARIZER_SYSTEM_PROMPT with tools=[] (no
+    tool call possible). A caller reusing the agent's own prefix passes its
+    system_prompt and tools so the provider can serve the history from cache;
+    if that reply contains a tool_use or no usable <summary>, the call is retried
+    once with tools=[] (same system prompt). The <analysis> block is discarded;
+    without a usable <summary> pair (see _extract_summary) the entire response
+    text is returned as a graceful fallback.
 
     Args:
         provider: LLM backend used to generate the summary.
         messages: Conversation history in API-ready ``list[dict]`` form.
         extra_instructions: Domain summary requirements folded into the compact
             prompt (see ``build_compact_prompt``). Blank means the base prompt.
+        system_prompt: System prompt of the summary call.
+        tools: Tool schemas of the summary call (None or [] = no tools).
 
     Returns:
         Extracted summary text (stripped of surrounding whitespace).
@@ -156,22 +164,37 @@ async def compact_conversation(
 
     response = await provider.complete(
         messages=compact_messages,
-        system_prompt=SUMMARIZER_SYSTEM_PROMPT,
-        tools=[],  # No tool calls permitted during summarization.
+        system_prompt=system_prompt,
+        tools=tools or [],
         config=config,
     )
+    if tools and (_has_tool_use(response) or _extract_summary(_response_text(response)) is None):
+        # A reused prefix exposes the agent's tools: a tool call (or a reply with
+        # no summary) is retried once without them — the only call that pays the
+        # full price for the history. A tool_use never enters state either way.
+        response = await provider.complete(
+            messages=compact_messages,
+            system_prompt=system_prompt,
+            tools=[],
+            config=config,
+        )
 
-    raw_text = ""
-    for block in response.content:
-        if hasattr(block, "text") and block.text:
-            raw_text += block.text
-
+    raw_text = _response_text(response)
     summary = _extract_summary(raw_text)
     if summary is not None:
         return summary
 
     # No usable <summary> pair — return the full response as a best-effort fallback.
     return raw_text.strip()
+
+
+def _response_text(response: AssistantResponse) -> str:
+    """Concatenate the response's text blocks."""
+    return "".join(block.text for block in response.content if getattr(block, "text", None))
+
+
+def _has_tool_use(response: AssistantResponse) -> bool:
+    return any(isinstance(block, ToolUseBlock) for block in response.content)
 
 
 def _extract_summary(raw_text: str) -> str | None:

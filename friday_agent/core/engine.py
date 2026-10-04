@@ -12,8 +12,9 @@ from __future__ import annotations
 from collections import Counter
 from typing import AsyncGenerator, Awaitable, Callable
 
+from friday_agent.api.prompts import assemble_system_prompt
 from friday_agent.api.provider import LLMConfig, LLMProvider
-from friday_agent.context.compact import compact_conversation, create_compact_summary_message
+from friday_agent.context.compact import SUMMARIZER_SYSTEM_PROMPT, compact_conversation, create_compact_summary_message
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     MemoryStore,
@@ -112,6 +113,18 @@ class FridayAgent:
         self._compact_instructions = compact_instructions
         self._turn_sections = list(turn_sections or [])
 
+    def _effective_system_prompt(self) -> str:
+        """Static system prefix: memory instructions (when mounted) -> domain prompt.
+
+        Must stay byte-stable within a session — it heads the cached prefix, and
+        compact(reuse_prefix=True) reproduces it to read the conversation cache.
+        """
+        memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
+        return "\n\n".join(p for p in (memory_section, self._system_prompt) if p)
+
+    def _tool_schemas(self) -> list[dict]:
+        return [tool.get_tool_schema() for tool in self._tools]
+
     async def step(self, state: LoopState) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]:
         """Run one turn, streaming each Message as run_one_turn produces it.
 
@@ -141,9 +154,7 @@ class FridayAgent:
         # index, then turn_sections outputs) is rebuilt every turn and rides
         # messages[-1] as turn-local reminders instead — in the system prompt it
         # would invalidate the whole conversation cache.
-        memory_section = MEMORY_INSTRUCTIONS if self._memory is not None else ""
-        parts = [p for p in (memory_section, self._system_prompt) if p]
-        effective_prompt = "\n\n".join(parts)
+        effective_prompt = self._effective_system_prompt()
         turn_reminders = (
             [await build_memory_reminder(self._memory)] if self._memory is not None else []
         )
@@ -152,11 +163,10 @@ class FridayAgent:
             if text:
                 turn_reminders.append(wrap_system_reminder(text))
         turn_reminders = [t for t in turn_reminders if t]
-        tool_schemas = [tool.get_tool_schema() for tool in self._tools]
         async for item in run_one_turn(
             provider=self._provider,
             tools=self._tools,
-            tool_schemas=tool_schemas,
+            tool_schemas=self._tool_schemas(),
             state=state,
             system_prompt=effective_prompt,
             config=self._config,
@@ -165,18 +175,29 @@ class FridayAgent:
         ):
             yield item
 
-    async def compact(self, state: LoopState) -> LoopState:
+    async def compact(self, state: LoopState, *, reuse_prefix: bool = False) -> LoopState:
         """Summarize the entire conversation into one summary message and return a smaller LoopState.
 
-        Recovery entry point for context overflow: when a turn cannot fit the
-        model's context window, call compact(state) to replace all of
-        state.messages with a single summary message, then retry. (After the
-        caller-owned-compaction refactor, step() surfaces this as a raised
-        ContextOverflowError.) turn_count is preserved for observability.
+        Recovery entry point for context overflow (and for proactive compaction):
+        when a turn cannot fit the model's context window, call compact(state) to
+        replace all of state.messages with a single summary message, then retry.
+        turn_count and todos are preserved.
 
-        The summarizer runs under SUMMARIZER_SYSTEM_PROMPT, not system_prompt —
+        By default the summarizer runs under SUMMARIZER_SYSTEM_PROMPT with no tools —
         compact_instructions (constructor) is the injection point for domain
-        requirements about what the summary must preserve.
+        requirements about what the summary must preserve. turn_sections are never
+        rendered here.
+
+        Args:
+            state: The state to compact.
+            reuse_prefix: Send the summary call with exactly the system prompt and
+                tool schemas step() sends, so the provider can serve the
+                conversation from its prompt cache instead of writing it again. A
+                reply that calls a tool or lacks a usable <summary> is retried once
+                with tools=[]. Best for proactive compaction: the agent's prefix adds
+                tokens, so during overflow recovery the summary call itself can
+                overflow; and with extended thinking enabled in this agent's config,
+                the summary call (thinking off) cannot reuse the message cache.
 
         Raises:
             PendingToolUseError: the state still has unanswered tool_use blocks
@@ -184,11 +205,17 @@ class FridayAgent:
         """
         if pending := pending_tool_uses(state):
             raise PendingToolUseError([block.id or "" for block in pending])
-        api_messages = normalize_for_api(state.messages)
+        if reuse_prefix:
+            system_prompt = str(assemble_system_prompt(self._effective_system_prompt()))
+            tool_schemas = self._tool_schemas()
+        else:
+            system_prompt, tool_schemas = SUMMARIZER_SYSTEM_PROMPT, []
         summary_text = await compact_conversation(
             provider=self._provider,
-            messages=api_messages,
+            messages=normalize_for_api(state.messages),
             extra_instructions=self._compact_instructions,
+            system_prompt=system_prompt,
+            tools=tool_schemas,
         )
         summary_message = create_compact_summary_message(summary_text)
         return LoopState(

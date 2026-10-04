@@ -91,7 +91,7 @@ If `config` is not of type `provider.config_type`, `ValueError` is raised immedi
 
 The context injection surface is intentionally simple: static content is passed by the caller as a single `system_prompt` string (multiple sections are combined on the caller side with `"\n\n".join(...)`). Per-turn content has exactly one engine-level hook, `turn_sections`: each section is awaited with the turn's input `LoopState`, empty output is dropped, and the SDK wraps the rest in `<system-reminder>` (the prefix the Anthropic adapter's breakpoint skip detects) and joins it onto the trailing user message after the todo reminder and the memory index — the `turn_reminders` path of `run_one_turn`. A section that raises propagates.
 
-`system_prompt` is **turn-loop only** — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it. What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
+`system_prompt` is **turn-loop only** by default — `compact()`'s summarization call runs with the dedicated `SUMMARIZER_SYSTEM_PROMPT`, so this prompt does not reach it (`compact(state, reuse_prefix=True)` sends it only to share the cached prefix). What the summary must preserve is specified by a separate string, `compact_instructions` (details: [04-context-compaction](04-context-compaction.md#domain-instruction-injection-slot-opt-in)).
 
 ### `engine.step(state) -> AsyncGenerator[Message | LoopState | Suspended | Terminal, None]`
 
@@ -109,9 +109,13 @@ async for item in engine.step(state):
 
 `ContextOverflowError` is not consumed; it propagates to the caller as-is.
 
-### `await engine.compact(state) -> LoopState`
+### `await engine.compact(state, *, reuse_prefix=False) -> LoopState`
 
-Reduces all of `state.messages` to a single summary. `turn_count` is preserved. `ContextOverflowError` recovery flow:
+Reduces all of `state.messages` to a single summary. `turn_count` is preserved.
+
+With `reuse_prefix=True`, the summary call reuses `step()`'s exact system prompt and tools so the provider can serve the history from its prompt cache (see [04-context-compaction](04-context-compaction.md)).
+
+`ContextOverflowError` recovery flow:
 
 ```
 step(state) → ContextOverflowError raised

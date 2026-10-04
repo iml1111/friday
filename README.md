@@ -115,7 +115,7 @@ If the last item received is a `Terminal`, stop the loop. `terminal.reason` is o
 
 ### Injecting Domain Requirements into Compaction (opt-in)
 
-The summarization call in `engine.compact()` runs with a dedicated summarizer system prompt, so `system_prompt` does not reach it. "What must the summary always retain in this domain" is passed via the constructor.
+By default, the summarization call in `engine.compact()` runs with a dedicated summarizer system prompt, so `system_prompt` does not reach it. "What must the summary always retain in this domain" is passed via the constructor.
 
 ```python
 engine = FridayAgent(
@@ -129,6 +129,8 @@ engine = FridayAgent(
 ```
 
 The injected block is placed **after** the default prompt's 9-section spec and **before** the output-format instructions, with a header stating it "takes precedence over the generic sections" — covering both adding sections and redefining existing ones. If omitted (the default), the prompt is byte-for-byte unchanged. For details, see [04-context-compaction](docs/architecture/04-context-compaction.md).
+
+Pass `reuse_prefix=True` (`await engine.compact(state, reuse_prefix=True)`) to send the summary call with the agent's own system prompt and tools — the provider can then serve the conversation from its prompt cache instead of writing it again. Use it for proactive compaction; leave it off when recovering from `ContextOverflowError`, since the extra prefix tokens can overflow the summary call itself.
 
 ### Per-Turn Context (opt-in)
 
