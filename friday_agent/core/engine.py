@@ -14,7 +14,7 @@ from collections import Counter
 from typing import AsyncGenerator
 
 from friday_agent.api.prompts import assemble_system_prompt, format_compact_prompt, format_compact_summary_message
-from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMProvider, ToolSchema, ToolUseBlock
+from friday_agent.api.provider import AssistantResponse, LLMConfig, LLMError, LLMProvider, ToolSchema, ToolUseBlock
 from friday_agent.memory.store import (
     MEMORY_INSTRUCTIONS,
     MemoryStore,
@@ -187,6 +187,8 @@ class FridayAgent:
                 compact prompt, so a state that already overflowed step()
                 overflows here too. Shrinking it first (e.g. dropping the oldest
                 turns, keeping tool_use/tool_result pairs) is the caller's job.
+            LLMError: the summary call failed, or its reply has no text even
+                after the retry — the caller keeps its state.
         """
         if pending := pending_tool_uses(state):
             raise PendingToolUseError([block.id or "" for block in pending])
@@ -211,6 +213,9 @@ class FridayAgent:
             )
 
         raw_text = self._response_text(response)
+        if not raw_text.strip():
+            # Nothing to fall back on: an empty summary would wipe the history.
+            raise LLMError("compact: the summary reply has no text")
         # No usable <summary> pair — keep the full response as a best-effort fallback.
         summary_text = self._extract_summary(raw_text) or raw_text.strip()
         summary_message = create_user_message(

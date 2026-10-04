@@ -4,8 +4,10 @@ import pytest
 from friday_agent.api.prompts import format_compact_prompt
 from friday_agent.api.provider import (
     AssistantResponse,
+    LLMError,
     StopReason,
     TextBlock,
+    ThinkingBlock,
     TokenUsage,
 )
 from friday_agent.core.engine import FridayAgent
@@ -163,6 +165,23 @@ async def test_compact_empty_summary_falls_back_to_full_text():
     text = (await _compact(provider)).content[0].text
 
     assert raw in text
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [[], [TextBlock(text="  \n")], [ThinkingBlock(thinking="planning the summary")]],
+    ids=["empty", "whitespace", "thinking-only"],
+)
+async def test_compact_raises_when_the_reply_has_no_text(content):
+    """A reply with no text, even after the no-tools retry, must not replace the
+    history with an empty summary: compact() raises so the caller keeps its state."""
+    reply = AssistantResponse(content=content, stop_reason=StopReason.END_TURN, usage=TokenUsage())
+    provider = FakeLLMProvider(responses=[reply, reply])
+
+    with pytest.raises(LLMError, match="no text"):
+        await _compact(provider)
     assert provider.call_count == 2
 
 
